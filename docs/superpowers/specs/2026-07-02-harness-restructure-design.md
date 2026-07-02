@@ -132,18 +132,25 @@ uses `goose serve` to drive the actual work, rather than shelling out to
 a separate `goose run` invocation.
 
 **The harness drives the session by consuming its event stream, not by
-polling a status endpoint.** ACP exposes SSE/WebSocket per PR #295, so
-`session/prompt` is treated as fire-and-forget (acks receipt, does not
-block for the full pipeline duration), and the harness's `internal/acp`
-client stays subscribed to the session's event stream until it sees a
-terminal event. This resolves the poll-vs-blocking-call ambiguity: there
-is no separate poll loop, there is one continuously-consumed stream.
+polling a status endpoint.** ACP exposes this over Streamable HTTP
+and/or WebSocket — goose does not support the older SSE transport, per
+goose's own docs — so `session/prompt` is treated as fire-and-forget
+(acks receipt, does not block for the full pipeline duration), and the
+harness's `internal/acp` client stays subscribed to the session's event
+stream until it sees a terminal event. This resolves the
+poll-vs-blocking-call ambiguity: there is no separate poll loop, there
+is one continuously-consumed stream.
+
+Also confirmed: `goose serve` requires an auth secret
+(`GOOSE_SERVER__SECRET_KEY`, or `--dangerously-unauthenticated` for
+local dev only) — `konveyor-configure` must set this before launch, see
+konveyor-configure below.
 
 ```
-1. Launch: goose serve --port 4000 &
+1. Launch: GOOSE_SERVER__SECRET_KEY=<generated> goose serve --port 4000 &
 2. Poll http://localhost:4000/acp until it responds (session endpoint ready)
 3. ACP call: POST /acp  { method: "session/new" }  → session_id
-4. Open the session's event stream (SSE/WebSocket) and subscribe
+4. Open the session's event stream (Streamable HTTP or WebSocket) and subscribe
 5. ACP call: POST /acp  { method: "session/prompt", session_id,
      message: "Load skill $KONVEYOR_SKILLS_DIR/orchestrator/SKILL.md.
                 Instructions: <contents of instructions.md>.
@@ -174,8 +181,13 @@ is no separate poll loop, there is one continuously-consumed stream.
 event names (`session/new`, `session/prompt`, the terminal event type,
 whether usage data is actually emitted on the stream, `session/load`'s
 replay behavior) are inferred from PR #295's description of the ACP
-protocol, not confirmed against goose's actual implementation. This
-whole mechanism — event-stream-driven session control — is the biggest
+protocol and the high-level ACP/goose docs, not confirmed against
+goose's actual wire protocol — neither goose's ACP client docs
+(goose-docs.ai) nor the ACP spec's overview page (agentclientprotocol.com)
+publish method names, payload shapes, or completion signaling at the
+level of detail needed to implement `internal/acp`; that requires
+reading goose's source or the ACP JSON schema directly. This whole
+mechanism — event-stream-driven session control — is the biggest
 unverified assumption in this spec and should be prototyped against a
 real `goose serve` instance before committing to `internal/acp`'s
 design. If goose's ACP implementation doesn't support streaming usage
@@ -183,6 +195,17 @@ or per-event granularity, the phases.json-expected-outputs fallback in
 step 7 still works for step completion tracking, but token_usage would
 need a different source (e.g., goose's own logs, or a metrics event we
 haven't confirmed exists).
+
+Also worth noting: the Agent Client Protocol's own overview
+distinguishes local agents (stdio JSON-RPC — the mature, fully-supported
+path) from remote agents (HTTP/WebSocket — explicitly described as
+"a work in progress"). `goose serve`'s HTTP/WebSocket ACP endpoint,
+which this design builds on for both driving and observability, falls
+into the less-mature remote-agent category. This was a deliberate
+choice (see Open Questions) to keep driving and observability unified
+on one endpoint rather than splitting to a stdio-based `goose acp` for
+driving — accepted as a real risk given the protocol's own
+work-in-progress label on this transport.
 
 ### Known Unknowns — Requires Prototyping
 
@@ -198,10 +221,12 @@ contradict later:
   the harness must confirm its stream subscription is fully
   established before treating the session as ready, or early events
   (including early usage/failure signals) could be silently missed.
-- **Transport**: SSE and WebSocket are materially different to
-  implement (text/event-stream vs framed messages, different
-  reconnect semantics). Which one goose's ACP endpoint actually uses
-  needs to be confirmed before writing `internal/acp`'s stream client.
+- **Transport**: confirmed goose does not support SSE — it's Streamable
+  HTTP and/or WebSocket. These are still materially different to
+  implement (chunked HTTP response parsing vs framed WebSocket
+  messages, different reconnect semantics). Which one goose's ACP
+  endpoint actually uses (or whether it's client-negotiable) needs to
+  be confirmed before writing `internal/acp`'s stream client.
 - **Error and reconnect handling**: if the stream connection drops
   before a terminal event (network blip, goose crash), does the
   harness reconnect and replay via `session/load`, treat it as a
@@ -219,6 +244,18 @@ contradict later:
   whether session.json's per-role `token_usage` (in the `models` list)
   is achievable as designed or needs to fall back to a single
   aggregate figure.
+- **Controller/UI auth to `/acp`**: `goose serve` requires
+  `GOOSE_SERVER__SECRET_KEY`, and konveyor-configure generates this
+  randomly per-run, known only to the harness. As designed, there is
+  no mechanism for the controller or UI to obtain this secret, so the
+  "controller and UI may connect concurrently for observability" claim
+  made earlier in this section does not actually work yet — either the
+  secret needs to be surfaced somewhere the controller can read it
+  (e.g. a well-known file path, or a value the controller itself
+  generates and passes in via env rather than the harness generating
+  it), or observability access requires a different mechanism entirely.
+  This needs to be resolved before the observability half of this
+  design can be considered real.
 
 ### konveyor-clone
 
@@ -261,6 +298,10 @@ konveyor-configure
   - Read LLM credential env vars (from envFrom Secrets)
   - Detect runtime (goose, opencode) by checking PATH
   - Write $HOME/.config/goose/config.yaml (or equivalent)
+  - Generate a random GOOSE_SERVER__SECRET_KEY for this run and export it
+    (goose serve requires this for auth; it's local to this pod/process —
+    the harness generates and consumes it itself, controller/UI never see it
+    unless a future design adds authenticated observability access)
 ```
 
 ### konveyor-detect
