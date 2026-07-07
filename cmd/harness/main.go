@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/konveyor/migration-harness/internal/acp"
@@ -124,10 +125,11 @@ func run() error {
 		}
 	}
 
-	if err := stopGoose(gooseCmd); err != nil {
-		return fmt.Errorf("stop goose: %w", err)
-	}
+	stopErr := stopGoose(gooseCmd)
 	gooseStopped = true
+	if stopErr != nil {
+		return fmt.Errorf("stop goose: %w", stopErr)
+	}
 
 	completedSteps, failedSteps := phases.CheckCompletion(repoDir, pipeline)
 	completedSteps = append([]string{"detect"}, completedSteps...)
@@ -221,7 +223,7 @@ func stopGoose(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		return cmd.Process.Kill()
 	}
 	done := make(chan error, 1)
