@@ -1,5 +1,10 @@
 # agent-base-goose — extends agent-base with the goose runtime and sets
 # the entrypoint. This is the image the POC actually deploys.
+
+# Assumes Podman (unqualified local builds are auto-namespaced as
+# localhost/<name>). Under plain Docker Engine, "localhost/" is parsed as
+# an explicit registry host and this FROM would fail to resolve locally —
+# confirm the actual build tool before relying on this image.
 FROM localhost/agent-base:latest
 
 RUN microdnf install -y bzip2 && microdnf clean all \
