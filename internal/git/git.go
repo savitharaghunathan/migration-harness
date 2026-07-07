@@ -115,7 +115,7 @@ func Push(repoDir string, files []string, message string, creds Credentials, ask
 		return nil // nothing staged
 	}
 
-	commit := exec.Command("git", "-C", repoDir, "commit", "-m", message)
+	commit := exec.Command("git", "-C", repoDir, "-c", "user.name=konveyor-harness", "-c", "user.email=konveyor-harness@noreply.local", "commit", "-m", message)
 	commit.Stdout = os.Stdout
 	commit.Stderr = os.Stderr
 	if err := commit.Run(); err != nil {

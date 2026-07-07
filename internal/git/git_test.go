@@ -16,6 +16,22 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// unsetEnv removes an environment variable for the duration of the test,
+// restoring its previous value (or absence) on cleanup. This differs from
+// t.Setenv(key, ""), which sets the variable to an explicit empty string —
+// git treats that as "identity is the empty string" rather than "no
+// identity configured", so it does NOT fall back to `-c user.name=...`/
+// config the way a genuinely unset variable does.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	if old, ok := os.LookupEnv(key); ok {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		t.Cleanup(func() { os.Setenv(key, old) })
+	}
+}
+
 // setupSeededRemote creates a bare git repo with one commit on branch
 // "main" and returns its filesystem path (usable as a file:// URL).
 func setupSeededRemote(t *testing.T) string {
@@ -198,7 +214,15 @@ func TestPush_CommitsAndPushesChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runGit(t, dest, "-c", "user.email=test@test.com", "-c", "user.name=test", "config", "user.email", "test@test.com")
+	// Strip any inherited git identity (env vars and global/user config) so
+	// this test only passes because Push's own -c flags supply an identity —
+	// not because the host machine happens to have a resolvable git user.
+	unsetEnv(t, "GIT_AUTHOR_NAME")
+	unsetEnv(t, "GIT_AUTHOR_EMAIL")
+	unsetEnv(t, "GIT_COMMITTER_NAME")
+	unsetEnv(t, "GIT_COMMITTER_EMAIL")
+	t.Setenv("HOME", t.TempDir())
+
 	askpass := writeAskpassScript(t)
 	err := Push(dest, []string{"NEW.md"}, "add NEW.md", Credentials{Token: "unused-for-file-url"}, askpass)
 	if err != nil {
