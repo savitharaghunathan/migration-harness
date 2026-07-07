@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -236,6 +237,73 @@ func TestPush_CommitsAndPushesChanges(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(verify, "NEW.md")); err != nil {
 		t.Fatalf("expected NEW.md to be pushed, got: %v", err)
+	}
+}
+
+func TestCommitCount_ReturnsOneForFreshlySeededRepo(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	count, err := CommitCount(dest)
+	if err != nil {
+		t.Fatalf("CommitCount failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected commit count 1, got %d", count)
+	}
+}
+
+func TestCommitCount_ReturnsTwoAfterAdditionalCommit(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dest, "SECOND.md"), []byte("second"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dest, "add", "SECOND.md")
+	runGit(t, dest, "-c", "user.email=test@test.com", "-c", "user.name=test", "commit", "-m", "second commit")
+
+	count, err := CommitCount(dest)
+	if err != nil {
+		t.Fatalf("CommitCount failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected commit count 2, got %d", count)
+	}
+}
+
+func TestHeadSHA_ReturnsCurrentCommitSHA(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	sha, err := HeadSHA(dest)
+	if err != nil {
+		t.Fatalf("HeadSHA failed: %v", err)
+	}
+	if len(sha) != 40 {
+		t.Fatalf("expected 40-character SHA, got %q (len %d)", sha, len(sha))
+	}
+	for _, c := range sha {
+		if !strings.Contains("0123456789abcdef", string(c)) {
+			t.Fatalf("expected hex SHA, got %q", sha)
+		}
+	}
+
+	want, err := exec.Command("git", "-C", dest, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse failed: %v", err)
+	}
+	if sha != strings.TrimSpace(string(want)) {
+		t.Fatalf("expected sha %q, got %q", strings.TrimSpace(string(want)), sha)
 	}
 }
 

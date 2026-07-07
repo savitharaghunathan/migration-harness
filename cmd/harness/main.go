@@ -125,14 +125,27 @@ func run() error {
 		}
 	}
 
-	stopErr := stopGoose(gooseCmd)
-	gooseStopped = true
-	if stopErr != nil {
-		return fmt.Errorf("stop goose: %w", stopErr)
+	if stopErr := stopGoose(gooseCmd); stopErr != nil {
+		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: failed to stop goose serve cleanly: %v\n", stopErr)
 	}
+	gooseStopped = true
 
 	completedSteps, failedSteps := phases.CheckCompletion(repoDir, pipeline)
 	completedSteps = append([]string{"detect"}, completedSteps...)
+
+	gitInfo := session.GitInfo{
+		TargetBranch: params.TargetBranch,
+	}
+	if commits, err := git.CommitCount(repoDir); err != nil {
+		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: failed to get commit count: %v\n", err)
+	} else {
+		gitInfo.Commits = commits
+	}
+	if sha, err := git.HeadSHA(repoDir); err != nil {
+		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: failed to get HEAD sha: %v\n", err)
+	} else {
+		gitInfo.LastCommitSHA = sha
+	}
 
 	durationSeconds := int(time.Since(startedAt).Seconds())
 	sess := session.Session{
@@ -153,9 +166,7 @@ func run() error {
 		}},
 		StepsCompleted: completedSteps,
 		StepsFailed:    failedSteps,
-		Git: session.GitInfo{
-			TargetBranch: params.TargetBranch,
-		},
+		Git:            gitInfo,
 	}
 	sessionPath := filepath.Join(repoDir, ".konveyor", "session.json")
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
@@ -169,11 +180,13 @@ func run() error {
 	}
 
 	exitCode := 0
+	resultsStatus := "succeeded"
 	if finalStatus != "complete" {
 		exitCode = 1
+		resultsStatus = "failed"
 	}
 	res := session.Results{
-		Status:          finalStatus,
+		Status:          resultsStatus,
 		ExitCode:        exitCode,
 		DurationSeconds: durationSeconds,
 		Git:             sess.Git,

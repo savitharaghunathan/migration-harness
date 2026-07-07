@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // Credentials holds git push/clone credentials read from the environment.
@@ -134,4 +136,26 @@ func Push(repoDir string, files []string, message string, creds Credentials, ask
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil
+}
+
+// CommitCount returns the number of commits reachable from HEAD in repoDir.
+func CommitCount(repoDir string) (int, error) {
+	out, err := exec.Command("git", "-C", repoDir, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count: %w", err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse commit count: %w", err)
+	}
+	return count, nil
+}
+
+// HeadSHA returns the current HEAD commit SHA in repoDir.
+func HeadSHA(repoDir string) (string, error) {
+	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
