@@ -62,7 +62,14 @@ func (c *Client) WaitReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		resp, err := c.http.Get(c.baseURL + "/acp")
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/acp", nil)
+		if err != nil {
+			cancel()
+			return fmt.Errorf("build readiness request: %w", err)
+		}
+		resp, err := c.http.Do(req)
+		cancel()
 		if err == nil {
 			resp.Body.Close()
 			return nil
