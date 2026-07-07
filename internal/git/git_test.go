@@ -136,3 +136,40 @@ func TestCheckoutOrCreateBranch_ChecksOutExistingRemoteBranch(t *testing.T) {
 		t.Fatalf("expected branch konveyor/existing, got %q", out)
 	}
 }
+
+func TestCredentialsFromEnv_HappyPath(t *testing.T) {
+	t.Setenv("KONVEYOR_GIT_USERNAME", "testuser")
+	t.Setenv("KONVEYOR_GIT_TOKEN", "testtoken")
+
+	creds, err := CredentialsFromEnv()
+	if err != nil {
+		t.Fatalf("CredentialsFromEnv failed: %v", err)
+	}
+
+	if creds.Username != "testuser" {
+		t.Fatalf("expected username testuser, got %q", creds.Username)
+	}
+	if creds.Token != "testtoken" {
+		t.Fatalf("expected token testtoken, got %q", creds.Token)
+	}
+}
+
+func TestCredentialsFromEnv_MissingUsername(t *testing.T) {
+	t.Setenv("KONVEYOR_GIT_USERNAME", "")
+	t.Setenv("KONVEYOR_GIT_TOKEN", "testtoken")
+
+	_, err := CredentialsFromEnv()
+	if err == nil {
+		t.Fatalf("expected error when username is empty, got nil")
+	}
+}
+
+func TestCredentialsFromEnv_MissingToken(t *testing.T) {
+	t.Setenv("KONVEYOR_GIT_USERNAME", "testuser")
+	t.Setenv("KONVEYOR_GIT_TOKEN", "")
+
+	_, err := CredentialsFromEnv()
+	if err == nil {
+		t.Fatalf("expected error when token is empty, got nil")
+	}
+}
