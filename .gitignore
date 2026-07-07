@@ -1,18 +1,1 @@
-# Runtime data — never commit
-*.jsonl
-*.json
-!package.json
-!coolstore.json
-
-# Superpowers subagent-driven-development scratch state
-.superpowers/
-
-# macOS
-.DS_Store
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+/bin/
