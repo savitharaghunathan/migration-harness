@@ -57,13 +57,12 @@ func setupSeededRemote(t *testing.T) string {
 	return remoteDir
 }
 
-func TestClone_ChecksOutFilesAndStripsCredentials(t *testing.T) {
+func TestClone_ChecksOutFilesAndRemoteStaysClean(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
+	rawURL := "file://" + remoteDir
 
-	// file:// URLs bypass credential injection (only https:// gets creds),
-	// so this also verifies non-https URLs pass through untouched.
-	err := Clone("file://"+remoteDir, dest, Credentials{Username: "u", Token: "t"})
+	err := Clone(rawURL, dest, Credentials{Username: "u", Token: "t"}, "")
 	if err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
@@ -76,38 +75,34 @@ func TestClone_ChecksOutFilesAndStripsCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get-url failed: %v", err)
 	}
-	got := string(out)
-	want := "file://" + remoteDir + "\n"
-	if got != want {
-		t.Fatalf("expected remote url %q, got %q", want, got)
+	got := strings.TrimSpace(string(out))
+	if got != rawURL {
+		t.Fatalf("expected remote url %q, got %q", rawURL, got)
 	}
 }
 
-func TestClone_InjectsCredentialsForHTTPS(t *testing.T) {
-	url, err := injectCredentials("https://example.com/org/repo.git", Credentials{Username: "myuser", Token: "mytoken"})
-	if err != nil {
-		t.Fatalf("injectCredentials failed: %v", err)
-	}
-	want := "https://myuser:mytoken@example.com/org/repo.git"
-	if url != want {
-		t.Fatalf("expected %q, got %q", want, url)
-	}
-}
+func TestClone_SetsAskpassEnvWhenProvided(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	askpass := writeAskpassScript(t)
 
-func TestClone_LeavesNonHTTPSURLsUnchanged(t *testing.T) {
-	url, err := injectCredentials("file:///tmp/repo.git", Credentials{Username: "u", Token: "t"})
+	// Local file:// clones need no credentials, so GIT_ASKPASS is never
+	// invoked — this just proves a non-empty askpassPath doesn't break
+	// clones that don't need it.
+	err := Clone("file://"+remoteDir, dest, Credentials{Username: "u", Token: "t"}, askpass)
 	if err != nil {
-		t.Fatalf("injectCredentials failed: %v", err)
+		t.Fatalf("Clone failed: %v", err)
 	}
-	if url != "file:///tmp/repo.git" {
-		t.Fatalf("expected unchanged url, got %q", url)
+
+	if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {
+		t.Fatalf("expected README.md in clone, got: %v", err)
 	}
 }
 
 func TestCheckoutOrCreateBranch_CreatesNewBranch(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 
@@ -130,14 +125,14 @@ func TestCheckoutOrCreateBranch_ChecksOutExistingRemoteBranch(t *testing.T) {
 
 	// Create the branch on the remote first, from a second working copy.
 	other := filepath.Join(t.TempDir(), "other")
-	if err := Clone("file://"+remoteDir, other, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, other, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 	runGit(t, other, "checkout", "-b", "konveyor/existing")
 	runGit(t, other, "push", "origin", "konveyor/existing")
 
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 
@@ -204,7 +199,7 @@ func writeAskpassScript(t *testing.T) string {
 func TestPush_CommitsAndPushesChanges(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 	if err := CheckoutOrCreateBranch(dest, "main"); err != nil {
@@ -232,7 +227,7 @@ func TestPush_CommitsAndPushesChanges(t *testing.T) {
 
 	// Verify the remote actually received the commit by cloning fresh.
 	verify := filepath.Join(t.TempDir(), "verify")
-	if err := Clone("file://"+remoteDir, verify, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, verify, Credentials{}, ""); err != nil {
 		t.Fatalf("verify clone failed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(verify, "NEW.md")); err != nil {
@@ -243,7 +238,7 @@ func TestPush_CommitsAndPushesChanges(t *testing.T) {
 func TestCommitCount_ReturnsOneForFreshlySeededRepo(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 
@@ -259,7 +254,7 @@ func TestCommitCount_ReturnsOneForFreshlySeededRepo(t *testing.T) {
 func TestCommitCount_ReturnsTwoAfterAdditionalCommit(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 
@@ -281,7 +276,7 @@ func TestCommitCount_ReturnsTwoAfterAdditionalCommit(t *testing.T) {
 func TestHeadSHA_ReturnsCurrentCommitSHA(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 
@@ -310,7 +305,7 @@ func TestHeadSHA_ReturnsCurrentCommitSHA(t *testing.T) {
 func TestPush_NoOpWhenNothingStaged(t *testing.T) {
 	remoteDir := setupSeededRemote(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 

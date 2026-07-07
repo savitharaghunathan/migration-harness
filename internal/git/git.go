@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -27,41 +26,26 @@ func CredentialsFromEnv() (Credentials, error) {
 	return Credentials{Username: username, Token: token}, nil
 }
 
-// injectCredentials adds basic-auth credentials to an https:// URL. Other
-// schemes (file://, git://, ssh://) pass through unchanged — this lets
-// local/test clones work without credentials.
-func injectCredentials(rawURL string, creds Credentials) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse url: %w", err)
+// Clone clones rawURL into dest. Credentials are never embedded in the
+// URL — when askpassPath is non-empty, git is configured to invoke it via
+// GIT_ASKPASS whenever it needs a credential, so the token only ever
+// travels through an env var to that helper script, never through argv or
+// a URL (and therefore never through any stderr git might emit). Pass an
+// empty askpassPath for URLs that need no auth (e.g. local file:// clones
+// in tests) — GIT_ASKPASS is then left unset and simply never invoked.
+func Clone(rawURL, dest string, creds Credentials, askpassPath string) error {
+	cmd := exec.Command("git", "clone", rawURL, dest)
+	if askpassPath != "" {
+		cmd.Env = append(os.Environ(),
+			"GIT_ASKPASS="+askpassPath,
+			"KONVEYOR_GIT_USERNAME="+creds.Username,
+			"KONVEYOR_GIT_TOKEN="+creds.Token,
+		)
 	}
-	if u.Scheme != "https" {
-		return rawURL, nil
-	}
-	u.User = url.UserPassword(creds.Username, creds.Token)
-	return u.String(), nil
-}
-
-// Clone clones url into dest, then strips any injected credentials from
-// the remote so the agent's own git operations can't push directly.
-func Clone(rawURL, dest string, creds Credentials) error {
-	authURL, err := injectCredentials(rawURL, creds)
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command("git", "clone", authURL, dest)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git clone: %w", err)
-	}
-
-	setURL := exec.Command("git", "-C", dest, "remote", "set-url", "origin", rawURL)
-	setURL.Stdout = os.Stdout
-	setURL.Stderr = os.Stderr
-	if err := setURL.Run(); err != nil {
-		return fmt.Errorf("strip credentials from remote: %w", err)
 	}
 	return nil
 }

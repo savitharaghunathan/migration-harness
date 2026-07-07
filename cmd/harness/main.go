@@ -45,7 +45,7 @@ func run() error {
 		return fmt.Errorf("load git credentials: %w", err)
 	}
 
-	if err := git.Clone(params.SourceURL, repoDir, creds); err != nil {
+	if err := git.Clone(params.SourceURL, repoDir, creds, askpassPath); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 	if err := git.CheckoutOrCreateBranch(repoDir, params.TargetBranch); err != nil {

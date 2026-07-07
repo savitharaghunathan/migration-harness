@@ -7,6 +7,8 @@ import (
 	"github.com/konveyor/migration-harness/internal/git"
 )
 
+const askpassPath = "/usr/local/bin/git-askpass.sh"
+
 func main() {
 	if len(os.Args) != 3 {
 		fmt.Fprintln(os.Stderr, "usage: konveyor-clone <url> <dest>")
@@ -19,7 +21,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "konveyor-clone: "+err.Error())
 		os.Exit(1)
 	}
-	if err := git.Clone(url, dest, creds); err != nil {
+	if err := git.Clone(url, dest, creds, askpassPath); err != nil {
 		fmt.Fprintln(os.Stderr, "konveyor-clone: "+err.Error())
 		os.Exit(1)
 	}
