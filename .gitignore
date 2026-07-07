@@ -4,6 +4,9 @@
 !package.json
 !coolstore.json
 
+# Superpowers subagent-driven-development scratch state
+.superpowers/
+
 # macOS
 .DS_Store
 
