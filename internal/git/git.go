@@ -92,3 +92,46 @@ func CheckoutOrCreateBranch(repoDir, branch string) error {
 	}
 	return nil
 }
+
+// Push stages files (or all changes if files is empty), commits, and
+// pushes to the current branch. If nothing is staged, it's a no-op —
+// callers may call Push speculatively without checking for changes first.
+func Push(repoDir string, files []string, message string, creds Credentials, askpassPath string) error {
+	var addArgs []string
+	if len(files) == 0 {
+		addArgs = []string{"-C", repoDir, "add", "-A"}
+	} else {
+		addArgs = append([]string{"-C", repoDir, "add"}, files...)
+	}
+	add := exec.Command("git", addArgs...)
+	add.Stdout = os.Stdout
+	add.Stderr = os.Stderr
+	if err := add.Run(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+
+	diff := exec.Command("git", "-C", repoDir, "diff", "--cached", "--quiet")
+	if err := diff.Run(); err == nil {
+		return nil // nothing staged
+	}
+
+	commit := exec.Command("git", "-C", repoDir, "commit", "-m", message)
+	commit.Stdout = os.Stdout
+	commit.Stderr = os.Stderr
+	if err := commit.Run(); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+
+	push := exec.Command("git", "-C", repoDir, "push", "origin", "HEAD")
+	push.Env = append(os.Environ(),
+		"GIT_ASKPASS="+askpassPath,
+		"KONVEYOR_GIT_USERNAME="+creds.Username,
+		"KONVEYOR_GIT_TOKEN="+creds.Token,
+	)
+	push.Stdout = os.Stdout
+	push.Stderr = os.Stderr
+	if err := push.Run(); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return nil
+}

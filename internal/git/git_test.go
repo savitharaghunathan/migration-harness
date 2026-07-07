@@ -173,3 +173,59 @@ func TestCredentialsFromEnv_MissingToken(t *testing.T) {
 		t.Fatalf("expected error when token is empty, got nil")
 	}
 }
+
+func writeAskpassScript(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "askpass.sh")
+	script := "#!/bin/sh\necho \"$KONVEYOR_GIT_TOKEN\"\n"
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPush_CommitsAndPushesChanges(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+	if err := CheckoutOrCreateBranch(dest, "main"); err != nil {
+		t.Fatalf("CheckoutOrCreateBranch failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dest, "NEW.md"), []byte("new file"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, dest, "-c", "user.email=test@test.com", "-c", "user.name=test", "config", "user.email", "test@test.com")
+	askpass := writeAskpassScript(t)
+	err := Push(dest, []string{"NEW.md"}, "add NEW.md", Credentials{Token: "unused-for-file-url"}, askpass)
+	if err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	// Verify the remote actually received the commit by cloning fresh.
+	verify := filepath.Join(t.TempDir(), "verify")
+	if err := Clone("file://"+remoteDir, verify, Credentials{}); err != nil {
+		t.Fatalf("verify clone failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(verify, "NEW.md")); err != nil {
+		t.Fatalf("expected NEW.md to be pushed, got: %v", err)
+	}
+}
+
+func TestPush_NoOpWhenNothingStaged(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := Clone("file://"+remoteDir, dest, Credentials{}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	askpass := writeAskpassScript(t)
+	// No file changes were made — Push must not error even though there's
+	// nothing to commit.
+	if err := Push(dest, nil, "no-op", Credentials{}, askpass); err != nil {
+		t.Fatalf("expected no-op Push to succeed, got: %v", err)
+	}
+}
