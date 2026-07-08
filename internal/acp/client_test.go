@@ -496,3 +496,135 @@ func TestClient_ConcurrentCallsGetCorrectlyMatchedResponses(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// --- Test 10: a cancelled call cleans up its pending-map entry ---
+
+func TestCall_CleansUpPendingEntryOnContextCancellation(t *testing.T) {
+	requestReceived := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("server accept: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+
+		ctx := r.Context()
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Errorf("server read: %v", err)
+			return
+		}
+		close(requestReceived)
+
+		// Never respond. Just keep the connection open until the client
+		// closes it, so the close handshake completes promptly.
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer connectCancel()
+
+	client, err := Connect(connectCtx, server.URL)
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer client.Close(context.Background())
+
+	callCtx, callCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer callCancel()
+
+	err = client.Initialize(callCtx)
+	if err == nil {
+		t.Fatal("expected Initialize to fail once its context expires")
+	}
+	if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected a context-deadline error, got: %v", err)
+	}
+
+	select {
+	case <-requestReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to receive the request")
+	}
+
+	client.mu.Lock()
+	pendingCount := len(client.pending)
+	client.mu.Unlock()
+	if pendingCount != 0 {
+		t.Fatalf("pending map has %d entries after context cancellation, want 0 (leaked pending entry)", pendingCount)
+	}
+}
+
+// --- Test 11: Close fails already-pending calls instead of leaving them to hang ---
+
+func TestClose_FailsAlreadyPendingCalls(t *testing.T) {
+	requestReceived := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("server accept: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+
+		ctx := r.Context()
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Errorf("server read: %v", err)
+			return
+		}
+		close(requestReceived)
+
+		// Never respond. Just keep the connection open until the client
+		// closes it.
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer connectCancel()
+
+	client, err := Connect(connectCtx, server.URL)
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	callDone := make(chan error, 1)
+	go func() {
+		// Use a background context (no deadline) so the only thing that
+		// can unblock this call is Close proactively failing it -- if
+		// Close doesn't do that, this goroutine hangs forever.
+		callDone <- client.Initialize(context.Background())
+	}()
+
+	select {
+	case <-requestReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to receive the request")
+	}
+
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer closeCancel()
+	if err := client.Close(closeCtx); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	select {
+	case err := <-callDone:
+		if err == nil {
+			t.Fatal("expected the pending Initialize call to fail once Close runs, got nil error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Initialize call still blocked 2s after Close -- Close did not fail pending calls")
+	}
+}

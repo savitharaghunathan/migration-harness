@@ -190,16 +190,23 @@ func (c *Client) readLoop() {
 	}
 }
 
+// failAllPending is called from the readLoop when the underlying
+// connection fails with a genuine read error -- a different scenario
+// from an intentional Close(). It swaps out c.pending for a fresh empty
+// map under the mutex before sending on the drained channels, so it
+// never holds the mutex while a channel send could block, and is safe
+// to call concurrently with (or after) Close's own draining: whichever
+// runs first claims the map's contents, and the other just finds an
+// empty map.
 func (c *Client) failAllPending(err error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return
-	}
+	pending := c.pending
+	c.pending = make(map[int64]chan rpcEnvelope)
+	c.mu.Unlock()
+
 	failure := rpcEnvelope{Error: &rpcError{Code: -1, Message: fmt.Sprintf("connection closed: %v", err)}}
-	for id, ch := range c.pending {
+	for _, ch := range pending {
 		ch <- failure
-		delete(c.pending, id)
 	}
 }
 
@@ -240,6 +247,9 @@ func (c *Client) call(ctx context.Context, method string, params interface{}) (j
 		}
 		return env.Result, nil
 	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
 		return nil, ctx.Err()
 	}
 }
@@ -305,10 +315,25 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (PromptResu
 	return pr, nil
 }
 
-// Close closes the underlying WebSocket connection.
+// Close closes the underlying WebSocket connection. Any calls still
+// blocked in call() waiting on a response are proactively failed here
+// (rather than left to hang until their own context expires) by
+// draining c.pending and sending a failure envelope to each waiter
+// before the connection is closed. Closing the connection will also
+// cause the readLoop to hit a read error and invoke failAllPending, but
+// by then c.pending is already empty, so that call is a no-op -- see
+// failAllPending's doc comment for why running both is safe.
 func (c *Client) Close(ctx context.Context) error {
 	c.mu.Lock()
 	c.closed = true
+	pending := c.pending
+	c.pending = make(map[int64]chan rpcEnvelope)
 	c.mu.Unlock()
+
+	closeErr := rpcEnvelope{Error: &rpcError{Code: -1, Message: "acp client closed"}}
+	for _, ch := range pending {
+		ch <- closeErr
+	}
+
 	return c.conn.Close(websocket.StatusNormalClosure, "")
 }
