@@ -29,7 +29,7 @@ func TestStatusForExitCode(t *testing.T) {
 }
 
 func TestBuildResults_WithGitInfoSupplied(t *testing.T) {
-	got := buildResults(0, 0, "konveyor/migrate-app-123", 12, "abc1234")
+	got := buildResults(0, "konveyor/migrate-app-123", 12, "abc1234")
 
 	want := session.Results{
 		Status:   "succeeded",
@@ -49,7 +49,7 @@ func TestBuildResults_WithGitInfoSupplied(t *testing.T) {
 func TestBuildResults_WithoutGitInfoDefaultsToZeroValue(t *testing.T) {
 	// Mirrors invoking the binary with just --exit-code, as before these
 	// flags existed: Git should remain entirely zero-valued.
-	got := buildResults(1, 0, "", 0, "")
+	got := buildResults(1, "", 0, "")
 
 	want := session.Results{
 		Status:   "failed",
@@ -63,20 +63,5 @@ func TestBuildResults_WithoutGitInfoDefaultsToZeroValue(t *testing.T) {
 
 	if got.Git.TargetBranch != "" || got.Git.Commits != 0 || got.Git.LastCommitSHA != "" {
 		t.Errorf("expected zero-valued Git fields when not supplied, got %+v", got.Git)
-	}
-}
-
-func TestBuildResults_DurationPopulated(t *testing.T) {
-	got := buildResults(0, 2700, "", 0, "")
-
-	want := session.Results{
-		Status:          "succeeded",
-		ExitCode:        0,
-		DurationSeconds: 2700,
-		Git:             session.GitInfo{},
-	}
-
-	if got != want {
-		t.Errorf("buildResults() = %+v, want %+v", got, want)
 	}
 }
