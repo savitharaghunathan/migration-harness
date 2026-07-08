@@ -8,7 +8,10 @@ import (
 )
 
 func TestParseArgs_MessageAndFiles(t *testing.T) {
-	message, files := parseArgs([]string{"--message", "hello world", "a.txt", "b.txt"})
+	message, files, err := parseArgs([]string{"--message", "hello world", "a.txt", "b.txt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if message != "hello world" {
 		t.Errorf("expected message %q, got %q", "hello world", message)
 	}
@@ -18,7 +21,10 @@ func TestParseArgs_MessageAndFiles(t *testing.T) {
 }
 
 func TestParseArgs_DefaultMessageWhenOmitted(t *testing.T) {
-	message, files := parseArgs([]string{"a.txt"})
+	message, files, err := parseArgs([]string{"a.txt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if message != "konveyor: update" {
 		t.Errorf("expected default message, got %q", message)
 	}
@@ -28,12 +34,22 @@ func TestParseArgs_DefaultMessageWhenOmitted(t *testing.T) {
 }
 
 func TestParseArgs_NoFilesMeansStageAll(t *testing.T) {
-	message, files := parseArgs([]string{"--message", "commit everything"})
+	message, files, err := parseArgs([]string{"--message", "commit everything"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if message != "commit everything" {
 		t.Errorf("expected message %q, got %q", "commit everything", message)
 	}
 	if len(files) != 0 {
 		t.Errorf("expected no files, got %v", files)
+	}
+}
+
+func TestParseArgs_TrailingMessageFlagReturnsError(t *testing.T) {
+	_, _, err := parseArgs([]string{"a.txt", "--message"})
+	if err == nil {
+		t.Fatal("expected error for trailing --message without a value")
 	}
 }
 

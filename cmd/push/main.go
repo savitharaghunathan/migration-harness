@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/hhpatel14/migration-harness/internal/cliutil"
@@ -18,7 +19,10 @@ func main() {
 // current working directory. Kept separate from main so it can be
 // exercised directly by tests without going through os.Exit.
 func run(args []string) error {
-	message, files := parseArgs(args)
+	message, files, err := parseArgs(args)
+	if err != nil {
+		return err
+	}
 
 	creds, err := git.CredentialsFromEnv()
 	if err != nil {
@@ -34,15 +38,18 @@ func run(args []string) error {
 	return nil
 }
 
-func parseArgs(args []string) (message string, files []string) {
+func parseArgs(args []string) (message string, files []string, err error) {
 	message = "konveyor: update"
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--message" && i+1 < len(args) {
+		if args[i] == "--message" {
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--message requires a value")
+			}
 			message = args[i+1]
 			i++
 			continue
 		}
 		files = append(files, args[i])
 	}
-	return message, files
+	return message, files, nil
 }
