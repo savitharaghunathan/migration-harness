@@ -59,7 +59,7 @@ func run() error {
 	if err := config.WriteGooseConfig(filepath.Join(homeDir, ".config", "goose")); err != nil {
 		return fmt.Errorf("write goose config: %w", err)
 	}
-	secretKey, err := config.GenerateSecretKey()
+	secretKey, err := config.SecretKey()
 	if err != nil {
 		return fmt.Errorf("generate secret key: %w", err)
 	}

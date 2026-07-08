@@ -50,6 +50,18 @@ func GenerateSecretKey() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// SecretKey returns the GOOSE_SERVER__SECRET_KEY to use for this run. If
+// KONVEYOR_GOOSE_SECRET_KEY is set (e.g. supplied by a controller that
+// wants to connect to this run's ACP endpoint for observability), it's
+// used directly. Otherwise a random key is generated as a local fallback
+// (e.g. for standalone runs without a controller).
+func SecretKey() (string, error) {
+	if v := os.Getenv("KONVEYOR_GOOSE_SECRET_KEY"); v != "" {
+		return v, nil
+	}
+	return GenerateSecretKey()
+}
+
 // WriteGooseConfig writes goose's config.yaml from GOOSE_PROVIDER/GOOSE_MODEL
 // env vars (passed through via envFrom from the LLMProvider Secret).
 func WriteGooseConfig(configDir string) error {

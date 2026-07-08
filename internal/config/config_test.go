@@ -83,6 +83,41 @@ func TestGenerateSecretKey_ProducesDifferentKeysEachCall(t *testing.T) {
 	}
 }
 
+func TestSecretKey_UsesEnvVarWhenSet(t *testing.T) {
+	t.Setenv("KONVEYOR_GOOSE_SECRET_KEY", "controller-supplied-secret")
+
+	key, err := SecretKey()
+	if err != nil {
+		t.Fatalf("SecretKey failed: %v", err)
+	}
+	if key != "controller-supplied-secret" {
+		t.Errorf("expected controller-supplied secret, got %q", key)
+	}
+}
+
+func TestSecretKey_GeneratesRandomKeyWhenEnvVarUnset(t *testing.T) {
+	t.Setenv("KONVEYOR_GOOSE_SECRET_KEY", "")
+
+	key1, err := SecretKey()
+	if err != nil {
+		t.Fatalf("SecretKey failed: %v", err)
+	}
+	key2, err := SecretKey()
+	if err != nil {
+		t.Fatalf("SecretKey failed: %v", err)
+	}
+
+	if len(key1) != 64 {
+		t.Errorf("expected 64-char hex string, got length %d: %q", len(key1), key1)
+	}
+	if len(key2) != 64 {
+		t.Errorf("expected 64-char hex string, got length %d: %q", len(key2), key2)
+	}
+	if key1 == key2 {
+		t.Error("expected two calls to produce different keys")
+	}
+}
+
 func TestWriteGooseConfig_WritesProviderAndModel(t *testing.T) {
 	t.Setenv("GOOSE_PROVIDER", "anthropic")
 	t.Setenv("GOOSE_MODEL", "claude-sonnet-4-20250514")

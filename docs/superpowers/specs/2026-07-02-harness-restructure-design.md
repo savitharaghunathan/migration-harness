@@ -245,17 +245,19 @@ contradict later:
   is achievable as designed or needs to fall back to a single
   aggregate figure.
 - **Controller/UI auth to `/acp`**: `goose serve` requires
-  `GOOSE_SERVER__SECRET_KEY`, and konveyor-configure generates this
-  randomly per-run, known only to the harness. As designed, there is
-  no mechanism for the controller or UI to obtain this secret, so the
-  "controller and UI may connect concurrently for observability" claim
-  made earlier in this section does not actually work yet — either the
-  secret needs to be surfaced somewhere the controller can read it
-  (e.g. a well-known file path, or a value the controller itself
-  generates and passes in via env rather than the harness generating
-  it), or observability access requires a different mechanism entirely.
-  This needs to be resolved before the observability half of this
-  design can be considered real.
+  `GOOSE_SERVER__SECRET_KEY`. The harness now supports an optional
+  `KONVEYOR_GOOSE_SECRET_KEY` env var (`internal/config.SecretKey()`):
+  if set, that value is used directly as the secret; otherwise the
+  harness falls back to generating one randomly per-run, as before.
+  This makes the harness *ready* to accept a controller-supplied
+  secret, but it does not by itself make the "controller and UI may
+  connect concurrently for observability" claim real — the controller
+  side (a separate repo) still needs to actually generate a secret and
+  inject it via this env var (and the UI needs a way to learn it in
+  turn). Until that controller-side mechanism is designed and built,
+  runs without `KONVEYOR_GOOSE_SECRET_KEY` set still generate a random
+  secret known only to the harness, and observability access does not
+  actually work yet.
 
 ### konveyor-clone
 
@@ -298,10 +300,14 @@ konveyor-configure
   - Read LLM credential env vars (from envFrom Secrets)
   - Detect runtime (goose, opencode) by checking PATH
   - Write $HOME/.config/goose/config.yaml (or equivalent)
-  - Generate a random GOOSE_SERVER__SECRET_KEY for this run and export it
-    (goose serve requires this for auth; it's local to this pod/process —
-    the harness generates and consumes it itself, controller/UI never see it
-    unless a future design adds authenticated observability access)
+  - Determine the GOOSE_SERVER__SECRET_KEY for this run and export it
+    (goose serve requires this for auth): use KONVEYOR_GOOSE_SECRET_KEY
+    if a controller has supplied one via env, otherwise generate one
+    randomly as a local fallback for standalone runs without a
+    controller. The controller-supplied path exists so a future
+    controller/UI can authenticate to this run's /acp endpoint for
+    observability, but the controller side of generating and injecting
+    that value is not yet designed/implemented (separate repo)
 ```
 
 ### konveyor-detect
