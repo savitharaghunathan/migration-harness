@@ -418,7 +418,7 @@ CR status. Not committed to git — dies with the pod.
   "exit_code": 0,
   "duration_seconds": 2700,
   "git": {
-    "branch": "konveyor/migrate-app-123",
+    "target_branch": "konveyor/migrate-app-123",
     "last_commit_sha": "abc1234"
   }
 }
