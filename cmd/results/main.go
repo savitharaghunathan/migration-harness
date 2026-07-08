@@ -3,8 +3,8 @@ package main
 import (
 	"flag"
 
-	"github.com/konveyor/migration-harness/internal/cliutil"
-	"github.com/konveyor/migration-harness/internal/session"
+	"github.com/hhpatel14/migration-harness/internal/cliutil"
+	"github.com/hhpatel14/migration-harness/internal/session"
 )
 
 func main() {

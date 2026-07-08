@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/konveyor/migration-harness/internal/session"
+	"github.com/hhpatel14/migration-harness/internal/session"
 )
 
 func TestStatusForExitCode(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/konveyor/migration-harness/internal/jsonfile"
+	"github.com/hhpatel14/migration-harness/internal/jsonfile"
 )
 
 type TokenUsage struct {

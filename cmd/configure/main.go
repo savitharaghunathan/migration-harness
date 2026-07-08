@@ -4,8 +4,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/konveyor/migration-harness/internal/cliutil"
-	"github.com/konveyor/migration-harness/internal/config"
+	"github.com/hhpatel14/migration-harness/internal/cliutil"
+	"github.com/hhpatel14/migration-harness/internal/config"
 )
 
 func main() {

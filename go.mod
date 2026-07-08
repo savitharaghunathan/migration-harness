@@ -1,4 +1,4 @@
-module github.com/konveyor/migration-harness
+module github.com/hhpatel14/migration-harness
 
 go 1.26.4
 

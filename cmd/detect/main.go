@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/konveyor/migration-harness/internal/cliutil"
-	"github.com/konveyor/migration-harness/internal/detect"
-	"github.com/konveyor/migration-harness/internal/jsonfile"
+	"github.com/hhpatel14/migration-harness/internal/cliutil"
+	"github.com/hhpatel14/migration-harness/internal/detect"
+	"github.com/hhpatel14/migration-harness/internal/jsonfile"
 )
 
 func main() {

@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/konveyor/migration-harness/internal/acp"
-	"github.com/konveyor/migration-harness/internal/cliutil"
-	"github.com/konveyor/migration-harness/internal/config"
-	"github.com/konveyor/migration-harness/internal/git"
-	"github.com/konveyor/migration-harness/internal/phases"
-	"github.com/konveyor/migration-harness/internal/session"
+	"github.com/hhpatel14/migration-harness/internal/acp"
+	"github.com/hhpatel14/migration-harness/internal/cliutil"
+	"github.com/hhpatel14/migration-harness/internal/config"
+	"github.com/hhpatel14/migration-harness/internal/git"
+	"github.com/hhpatel14/migration-harness/internal/phases"
+	"github.com/hhpatel14/migration-harness/internal/session"
 )
 
 const (

@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/konveyor/migration-harness/internal/cliutil"
-	"github.com/konveyor/migration-harness/internal/git"
+	"github.com/hhpatel14/migration-harness/internal/cliutil"
+	"github.com/hhpatel14/migration-harness/internal/git"
 )
 
 func main() {

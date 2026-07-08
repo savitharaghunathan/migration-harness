@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/konveyor/migration-harness/internal/jsonfile"
+	"github.com/hhpatel14/migration-harness/internal/jsonfile"
 )
 
 // Phase describes one entry in phases.json — a named unit of LLM work
