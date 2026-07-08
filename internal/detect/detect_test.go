@@ -67,6 +67,26 @@ func TestSummarize_CountsFilesAndGraphStats(t *testing.T) {
 	}
 }
 
+func TestSummarize_GodNodeThresholdIsStrictlyGreaterThan20(t *testing.T) {
+	dir := t.TempDir()
+
+	graphJSON := []byte(`{
+		"nodes": [
+			{"source_file": "src/Boundary.java", "degree": 20}
+		],
+		"links": [],
+		"communities": []
+	}`)
+
+	summary, err := Summarize(dir, graphJSON)
+	if err != nil {
+		t.Fatalf("Summarize failed: %v", err)
+	}
+	if summary.Graph.GodNodes != 0 {
+		t.Errorf("expected 0 god nodes for a node at exactly degree=20 (threshold is strictly > 20), got %d", summary.Graph.GodNodes)
+	}
+}
+
 func TestSummarize_ErrorsOnInvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Summarize(dir, []byte("not json"))

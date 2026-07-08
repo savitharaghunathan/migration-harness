@@ -29,10 +29,10 @@ type GitInfo struct {
 }
 
 // Session is written by the harness to .konveyor/session.json and pushed
-// to git. It intentionally has no "stage" field — this document has no
-// defined stage vocabulary yet (that belongs to a future AgentPlaybook
-// design). models is a list keyed by role (not a flat single model) to
-// match PR #295's primary/efficient/planner convention.
+// to git. It has no "stage" field — no stage vocabulary is defined yet.
+// Models is a list keyed by role (not a flat single model) so multi-model
+// runs, where different pipeline phases use different models, can be
+// represented with separate token usage per role.
 type Session struct {
 	SessionID       string       `json:"session_id"`
 	Status          string       `json:"status"`

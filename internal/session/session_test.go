@@ -67,6 +67,20 @@ func TestSession_WriteTo_ProducesExpectedShape(t *testing.T) {
 	if _, hasStage := raw["stage"]; hasStage {
 		t.Error("session.json must NOT have a top-level 'stage' field (dropped per spec)")
 	}
+
+	gitField, ok := raw["git"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected git field to be an object, got %v", raw["git"])
+	}
+	if gitField["target_branch"] != "konveyor/migrate-app-123" {
+		t.Errorf("expected target_branch field, got %v", gitField)
+	}
+	if gitField["commits"] != float64(12) {
+		t.Errorf("expected commits field, got %v", gitField)
+	}
+	if gitField["last_commit_sha"] != "abc1234" {
+		t.Errorf("expected last_commit_sha field, got %v", gitField)
+	}
 }
 
 func TestResults_WriteTo_ProducesExpectedShape(t *testing.T) {

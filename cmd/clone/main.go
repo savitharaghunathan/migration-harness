@@ -10,11 +10,11 @@ import (
 const askpassPath = "/usr/local/bin/git-askpass.sh"
 
 func main() {
-	if len(os.Args) != 3 {
+	url, dest, err := parseArgs(os.Args[1:])
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "usage: konveyor-clone <url> <dest>")
 		os.Exit(1)
 	}
-	url, dest := os.Args[1], os.Args[2]
 
 	creds, err := git.CredentialsFromEnv()
 	if err != nil {
@@ -32,4 +32,13 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// parseArgs validates and extracts the positional url/dest arguments.
+// It expects exactly two positional args: url, dest.
+func parseArgs(args []string) (url, dest string, err error) {
+	if len(args) != 2 {
+		return "", "", fmt.Errorf("expected exactly 2 args (url, dest), got %d", len(args))
+	}
+	return args[0], args[1], nil
 }
