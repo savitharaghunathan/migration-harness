@@ -242,7 +242,10 @@ func stopGoose(cmd *exec.Cmd) error {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
-	case <-done:
+	case waitErr := <-done:
+		if waitErr != nil {
+			fmt.Fprintf(os.Stderr, "konveyor-harness: warning: goose serve exited with error during shutdown: %v\n", waitErr)
+		}
 		return nil
 	case <-time.After(10 * time.Second):
 		return cmd.Process.Kill()

@@ -149,6 +149,25 @@ func TestCheckoutOrCreateBranch_ChecksOutExistingRemoteBranch(t *testing.T) {
 	}
 }
 
+func TestCheckoutOrCreateBranch_ReturnsErrorOnGenuineFailure(t *testing.T) {
+	remoteDir := setupSeededRemote(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := Clone("file://"+remoteDir, dest, Credentials{}, ""); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	// Point origin at a path that isn't a git repo at all, so `git
+	// ls-remote` fails with something other than exit code 2 (typically
+	// "fatal: '...' does not appear to be a git repository", exit code
+	// 128) — proving CheckoutOrCreateBranch does NOT silently fall
+	// through to creating a new local branch on a genuine failure.
+	runGit(t, dest, "remote", "set-url", "origin", "/nonexistent/path/that/does/not/exist")
+
+	if err := CheckoutOrCreateBranch(dest, "konveyor/some-branch"); err == nil {
+		t.Fatal("expected CheckoutOrCreateBranch to return an error on genuine ls-remote failure, got nil")
+	}
+}
+
 func TestCredentialsFromEnv_HappyPath(t *testing.T) {
 	t.Setenv("KONVEYOR_GIT_USERNAME", "testuser")
 	t.Setenv("KONVEYOR_GIT_TOKEN", "testtoken")

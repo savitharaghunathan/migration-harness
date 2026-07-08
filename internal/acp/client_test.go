@@ -157,6 +157,49 @@ func TestClient_Stream_ClosesChannelWhenContextCancelled(t *testing.T) {
 	}
 }
 
+func TestClient_Stream_EmitsStreamErrorEventOnConnectionFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/acp/sessions/sess-1/events", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, `{"type":"usage","data":{"input_tokens":1,"output_tokens":1}}`)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("expected ResponseWriter to support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		conn.Close()
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := New(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	events, err := client.Stream(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("Stream failed: %v", err)
+	}
+
+	var seen []Event
+	for e := range events {
+		seen = append(seen, e)
+	}
+
+	if len(seen) < 2 {
+		t.Fatalf("expected at least 2 events (usage + stream_error), got %d: %+v", len(seen), seen)
+	}
+	last := seen[len(seen)-1]
+	if last.Type != "stream_error" {
+		t.Fatalf("expected last event to be stream_error, got %+v", last)
+	}
+}
+
 func TestUsageFromEvent_ExtractsTokenCounts(t *testing.T) {
 	e := Event{Type: "usage", Data: json.RawMessage(`{"input_tokens":100,"output_tokens":20}`)}
 	input, output := UsageFromEvent(e)

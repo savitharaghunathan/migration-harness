@@ -1,6 +1,8 @@
 package git
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,7 +56,10 @@ func Clone(rawURL, dest string, creds Credentials, askpassPath string) error {
 // otherwise creates it locally from the current HEAD.
 func CheckoutOrCreateBranch(repoDir, branch string) error {
 	check := exec.Command("git", "-C", repoDir, "ls-remote", "--exit-code", "--heads", "origin", branch)
-	if err := check.Run(); err == nil {
+	var stderr bytes.Buffer
+	check.Stderr = &stderr
+	err := check.Run()
+	if err == nil {
 		fetch := exec.Command("git", "-C", repoDir, "fetch", "origin", branch)
 		fetch.Stdout = os.Stdout
 		fetch.Stderr = os.Stderr
@@ -68,6 +73,15 @@ func CheckoutOrCreateBranch(repoDir, branch string) error {
 			return fmt.Errorf("checkout existing branch: %w", err)
 		}
 		return nil
+	}
+
+	// git ls-remote --exit-code returns exit code 2 specifically when no
+	// matching refs are found. Any other non-zero exit code (network
+	// failure, auth failure, bad remote, etc.) is a genuine failure that
+	// must not be silently treated as "branch doesn't exist".
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+		return fmt.Errorf("check remote branch existence: %w (stderr: %s)", err, stderr.String())
 	}
 
 	create := exec.Command("git", "-C", repoDir, "checkout", "-b", branch)

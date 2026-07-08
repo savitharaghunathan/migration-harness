@@ -179,6 +179,21 @@ func (c *Client) Stream(ctx context.Context, sessionID string) (<-chan Event, er
 				return
 			}
 		}
+		// Only surface a scanner error as a stream_error event if it wasn't
+		// caused by our own context being cancelled — cancellation aborts
+		// the underlying read and shows up as a scanner error too, but
+		// that's an intentional, clean stop, not a genuine transport
+		// failure worth reporting.
+		if scanErr := scanner.Err(); scanErr != nil && ctx.Err() == nil {
+			errEvent := Event{
+				Type: "stream_error",
+				Data: json.RawMessage(fmt.Sprintf(`{"error":%q}`, scanErr.Error())),
+			}
+			select {
+			case events <- errEvent:
+			case <-ctx.Done():
+			}
+		}
 	}()
 	return events, nil
 }
