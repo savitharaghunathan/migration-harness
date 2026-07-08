@@ -1,7 +1,8 @@
 package main
 
 import (
-	"fmt"
+	"flag"
+	"io"
 	"os"
 
 	"github.com/hhpatel14/migration-harness/internal/cliutil"
@@ -38,18 +39,18 @@ func run(args []string) error {
 	return nil
 }
 
+// parseArgs parses konveyor-push's arguments using the standard flag
+// package, matching the convention established by konveyor-results.
+// A dedicated FlagSet (rather than the global flag.CommandLine) is used
+// since this function takes an explicit args slice instead of reading
+// os.Args, and flag.ContinueOnError lets callers handle parse errors
+// instead of the flag package printing usage and calling os.Exit.
 func parseArgs(args []string) (message string, files []string, err error) {
-	message = "konveyor: update"
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--message" {
-			if i+1 >= len(args) {
-				return "", nil, fmt.Errorf("--message requires a value")
-			}
-			message = args[i+1]
-			i++
-			continue
-		}
-		files = append(files, args[i])
+	fs := flag.NewFlagSet("konveyor-push", flag.ContinueOnError)
+	fs.SetOutput(io.Discard) // run() reports errors itself; suppress flag's own output
+	msg := fs.String("message", "konveyor: update", "commit message")
+	if err := fs.Parse(args); err != nil {
+		return "", nil, err
 	}
-	return message, files, nil
+	return *msg, fs.Args(), nil
 }

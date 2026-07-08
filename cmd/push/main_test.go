@@ -47,7 +47,13 @@ func TestParseArgs_NoFilesMeansStageAll(t *testing.T) {
 }
 
 func TestParseArgs_TrailingMessageFlagReturnsError(t *testing.T) {
-	_, _, err := parseArgs([]string{"a.txt", "--message"})
+	// With the standard flag package, flag parsing stops consuming flags
+	// at the first non-flag argument, so "--message" must appear before
+	// any positional file args to be recognized as a flag at all (this
+	// matches how konveyor-push is invoked in practice: --message first,
+	// then files). A bare trailing "--message" with no value exercises
+	// the value-less-flag error path.
+	_, _, err := parseArgs([]string{"--message"})
 	if err == nil {
 		t.Fatal("expected error for trailing --message without a value")
 	}
