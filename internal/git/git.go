@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+// DefaultAskpassPath is where the GIT_ASKPASS helper script is installed
+// in the container image (see dockerfiles/agent-base.Dockerfile).
+const DefaultAskpassPath = "/usr/local/bin/git-askpass.sh"
+
 // Credentials holds git push/clone credentials read from the environment.
 type Credentials struct {
 	Username string

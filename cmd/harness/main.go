@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,9 +18,8 @@ import (
 )
 
 const (
-	repoDir     = "/workspace/repo"
-	askpassPath = "/usr/local/bin/git-askpass.sh"
-	acpBaseURL  = "http://localhost:4000"
+	repoDir    = "/workspace/repo"
+	acpBaseURL = "http://localhost:4000"
 )
 
 func main() {
@@ -45,7 +45,7 @@ func run() error {
 		return fmt.Errorf("load git credentials: %w", err)
 	}
 
-	if err := git.Clone(params.SourceURL, repoDir, creds, askpassPath); err != nil {
+	if err := git.Clone(params.SourceURL, repoDir, creds, git.DefaultAskpassPath); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 	if err := git.CheckoutOrCreateBranch(repoDir, params.TargetBranch); err != nil {
@@ -64,10 +64,34 @@ func run() error {
 		return fmt.Errorf("generate secret key: %w", err)
 	}
 
+	// launchGoose only depends on the goose config and secret key written
+	// above, not on detect/push completing. Its process startup is
+	// kicked off here (exec.Cmd.Start is non-blocking) so that goose boots
+	// concurrently with runDetect + the detect-artifacts push below,
+	// overlapping goose's own startup latency with that work instead of
+	// paying for it serially. We still block on acp.WaitReady afterward,
+	// but by then goose has had the whole detect+push duration to come up,
+	// so the wait is typically near-instant.
+	//
+	// The gooseCmd/gooseStopped bookkeeping and cleanup defer are set up
+	// immediately once the process is started — before we know whether
+	// detect/push will succeed — so that a failure in that chain still
+	// stops the already-running goose process rather than leaking it.
+	gooseCmd, err := launchGoose(secretKey)
+	if err != nil {
+		return fmt.Errorf("launch goose: %w", err)
+	}
+	gooseStopped := false
+	defer func() {
+		if !gooseStopped && gooseCmd.Process != nil {
+			gooseCmd.Process.Kill()
+		}
+	}()
+
 	if err := runDetect(repoDir); err != nil {
 		return fmt.Errorf("detect: %w", err)
 	}
-	if err := git.Push(repoDir, []string{"detect.json", "graph.json"}, "konveyor: detect phase", creds, askpassPath); err != nil {
+	if err := git.Push(repoDir, []string{"detect.json", "graph.json"}, "konveyor: detect phase", creds, git.DefaultAskpassPath); err != nil {
 		return fmt.Errorf("push detect artifacts: %w", err)
 	}
 
@@ -81,17 +105,6 @@ func run() error {
 	if err := phases.WriteJSON(phasesPath, pipeline); err != nil {
 		return fmt.Errorf("write phases.json: %w", err)
 	}
-
-	gooseCmd, err := launchGoose(secretKey)
-	if err != nil {
-		return fmt.Errorf("launch goose: %w", err)
-	}
-	gooseStopped := false
-	defer func() {
-		if !gooseStopped && gooseCmd.Process != nil {
-			gooseCmd.Process.Kill()
-		}
-	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
@@ -182,7 +195,7 @@ func run() error {
 	if err := sess.WriteTo(sessionPath); err != nil {
 		return fmt.Errorf("write session.json: %w", err)
 	}
-	if err := git.Push(repoDir, []string{".konveyor/session.json"}, "konveyor: session metadata", creds, askpassPath); err != nil {
+	if err := git.Push(repoDir, []string{".konveyor/session.json"}, "konveyor: session metadata", creds, git.DefaultAskpassPath); err != nil {
 		return fmt.Errorf("push session.json: %w", err)
 	}
 
@@ -226,13 +239,30 @@ func runDetect(repoDir string) error {
 
 func launchGoose(secretKey string) (*exec.Cmd, error) {
 	cmd := exec.Command("goose", "serve", "--port", "4000")
-	cmd.Env = append(os.Environ(), "GOOSE_SERVER__SECRET_KEY="+secretKey)
+	cmd.Env = append(filteredEnviron(), "GOOSE_SERVER__SECRET_KEY="+secretKey)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start goose serve: %w", err)
 	}
 	return cmd, nil
+}
+
+// filteredEnviron returns the current process environment with git
+// credential variables removed. The agent (goose) must never receive
+// git push credentials directly, even though it inherits most of the
+// harness's environment for other purposes (LLM provider credentials,
+// PATH, HOME, etc.) — see the design spec's credential handling section.
+func filteredEnviron() []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "KONVEYOR_GIT_") {
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return filtered
 }
 
 // stopGoose sends an interrupt and waits up to 10s before force-killing.

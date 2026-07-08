@@ -18,3 +18,28 @@ func TestBuildPromptMessage_IncludesSkillsDirInstructionsAndPhasesPath(t *testin
 		t.Errorf("expected message to reference phases.json path, got: %s", msg)
 	}
 }
+
+func TestFilteredEnviron_RemovesGitCredentialsOnly(t *testing.T) {
+	t.Setenv("KONVEYOR_GIT_USERNAME", "some-user")
+	t.Setenv("KONVEYOR_GIT_TOKEN", "super-secret-token")
+	t.Setenv("GOOSE_PROVIDER", "anthropic")
+
+	env := filteredEnviron()
+
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "KONVEYOR_GIT_") {
+			t.Errorf("expected filtered environment to omit KONVEYOR_GIT_* vars, found: %s", kv)
+		}
+	}
+
+	found := false
+	for _, kv := range env {
+		if kv == "GOOSE_PROVIDER=anthropic" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected filtered environment to retain unrelated vars, GOOSE_PROVIDER=anthropic not found in: %v", env)
+	}
+}
