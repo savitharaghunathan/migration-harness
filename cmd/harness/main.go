@@ -93,35 +93,42 @@ func run() error {
 		}
 	}()
 
-	client := acp.New(acpBaseURL)
-	if err := client.WaitReady(30 * time.Second); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	defer cancel()
+
+	if err := acp.WaitReady(ctx, acpBaseURL, 30*time.Second); err != nil {
 		return fmt.Errorf("wait for acp: %w", err)
 	}
-	sessionID, err := client.NewSession()
+
+	client, err := acp.Connect(ctx, acpBaseURL)
+	if err != nil {
+		return fmt.Errorf("connect to acp: %w", err)
+	}
+	defer client.Close(ctx)
+
+	if err := client.Initialize(ctx); err != nil {
+		return fmt.Errorf("acp initialize: %w", err)
+	}
+
+	sessionID, err := client.NewSession(ctx, repoDir)
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
-	defer cancel()
-	events, err := client.Stream(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("open event stream: %w", err)
-	}
-
 	message := buildPromptMessage(params.SkillsDir, instructionsPath, phasesPath)
-	if err := client.Prompt(sessionID, message); err != nil {
-		return fmt.Errorf("session/prompt: %w", err)
-	}
+	promptResult, promptErr := client.Prompt(ctx, sessionID, message)
 
 	var inputTokens, outputTokens int
 	finalStatus := "failed"
-	for e := range events {
-		in, out := acp.UsageFromEvent(e)
-		inputTokens += in
-		outputTokens += out
-		if e.Type == "complete" {
+	if promptErr != nil {
+		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: session/prompt failed: %v\n", promptErr)
+	} else {
+		inputTokens = promptResult.Usage.InputTokens
+		outputTokens = promptResult.Usage.OutputTokens
+		if promptResult.StopReason == "end_turn" {
 			finalStatus = "complete"
+		} else {
+			fmt.Fprintf(os.Stderr, "konveyor-harness: warning: session ended with stopReason=%q\n", promptResult.StopReason)
 		}
 	}
 
