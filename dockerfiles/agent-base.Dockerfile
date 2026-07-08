@@ -25,7 +25,7 @@ COPY bin/konveyor-harness    /usr/local/bin/
 # passing them via argv. This is part of the credential-isolation
 # design: the agent runtime (goose, installed in agent-base-goose) must
 # never receive git push credentials in its own environment — see
-# cmd/harness/main.go's filteredEnviron/git.FilterCredentials and the
+# internal/git.FilterCredentials, used by cmd/harness/main.go, and the
 # design spec's credential handling section.
 COPY scripts/git-askpass.sh /usr/local/bin/git-askpass.sh
 RUN chmod +x /usr/local/bin/git-askpass.sh
