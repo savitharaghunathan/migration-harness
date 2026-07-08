@@ -55,7 +55,12 @@ func (s Session) WriteTo(path string) error {
 }
 
 // Results is written by the harness to the pod-local /.konveyor/results.json
-// (NOT committed to git). Read by the controller after pod completion.
+// (NOT committed to git). This lives on the container's ephemeral rootfs,
+// not a PVC, so it does not survive pod teardown and cannot be read by
+// anything outside the container after it exits. It is a fallback for
+// pod-local tooling (e.g. standalone CLI-style runs without a controller
+// attached), NOT a reliable channel for the controller, which reads status
+// via the ACP connection instead.
 type Results struct {
 	Status          string  `json:"status"`
 	ExitCode        int     `json:"exit_code"`

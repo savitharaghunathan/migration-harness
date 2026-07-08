@@ -341,7 +341,13 @@ konveyor-results --exit-code <N>
   - Write /.konveyor/results.json
   - Contains: status, exit_code, duration, git branch, last commit SHA
   - Pod-local only — NOT committed to git
-  - Controller reads this after pod completion
+  - Written for a pod-local fallback use case (e.g. tooling that
+    inspects the running/recently-exited container directly), NOT a
+    reliable channel for the controller — the controller reads status
+    via the ACP connection instead (see "Observability Ownership"
+    below). Since /.konveyor/ is on the container's ephemeral rootfs,
+    not a PVC, this file does not survive pod teardown and cannot be
+    read by anything outside the container after it exits.
 ```
 
 ## Skills
@@ -447,7 +453,10 @@ Container starts → konveyor-harness run
 │
 └─ 8. WRITE RESULTS
      konveyor-results --exit-code $SESSION_EXIT_CODE
-     → /.konveyor/results.json (pod-local, controller reads it)
+     → /.konveyor/results.json (pod-local fallback only — lives on the
+       container's ephemeral rootfs, not a PVC, so it does not survive
+       pod teardown; the controller's real status channel is ACP, not
+       this file — see "Observability Ownership")
      Exit
 ```
 
@@ -546,8 +555,15 @@ scope), and a stale example value here caused confusion in review.
 
 ### results.json (pod-local)
 
-Written by `konveyor-results` to `/.konveyor/results.json`. Read by the
-controller after pod completion. NOT committed to git.
+Written by `konveyor-results` to `/.konveyor/results.json`. NOT
+committed to git. This is a pod-local fallback for tooling that
+inspects the running or recently-exited container directly (e.g.
+standalone CLI-style runs without a controller attached) — it is NOT a
+reliable channel for the controller, which reads status via the ACP
+connection instead (see "Observability Ownership" above). `/.konveyor/`
+lives on the container's ephemeral rootfs, not a PVC, so this file does
+not survive pod teardown and cannot be read by anything outside the
+container after it exits.
 
 ```json
 {
