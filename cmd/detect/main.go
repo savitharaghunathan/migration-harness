@@ -1,13 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 
 	"github.com/konveyor/migration-harness/internal/detect"
+	"github.com/konveyor/migration-harness/internal/jsonfile"
 )
 
 func main() {
@@ -43,9 +43,8 @@ func run(repoDir string) error {
 		return fmt.Errorf("summarize: %w", err)
 	}
 
-	data, err := json.MarshalIndent(summary, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal detect.json: %w", err)
+	if err := jsonfile.Write(filepath.Join(repoDir, "detect.json"), summary); err != nil {
+		return fmt.Errorf("write detect.json: %w", err)
 	}
-	return os.WriteFile(filepath.Join(repoDir, "detect.json"), data, 0644)
+	return nil
 }

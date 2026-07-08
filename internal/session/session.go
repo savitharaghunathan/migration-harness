@@ -1,10 +1,10 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"time"
+
+	"github.com/konveyor/migration-harness/internal/jsonfile"
 )
 
 type TokenUsage struct {
@@ -47,11 +47,10 @@ type Session struct {
 }
 
 func (s Session) WriteTo(path string) error {
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal session: %w", err)
+	if err := jsonfile.Write(path, s); err != nil {
+		return fmt.Errorf("write session: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return nil
 }
 
 // Results is written by the harness to the pod-local /.konveyor/results.json
@@ -69,9 +68,8 @@ type Results struct {
 }
 
 func (r Results) WriteTo(path string) error {
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal results: %w", err)
+	if err := jsonfile.Write(path, r); err != nil {
+		return fmt.Errorf("write results: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return nil
 }

@@ -1,10 +1,11 @@
 package phases
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/konveyor/migration-harness/internal/jsonfile"
 )
 
 // Phase describes one entry in phases.json — a named unit of LLM work
@@ -35,11 +36,10 @@ func DefaultPipeline() []Phase {
 // WriteJSON writes the phase list to path as JSON, for the orchestrator
 // skill to read.
 func WriteJSON(path string, phases []Phase) error {
-	data, err := json.MarshalIndent(phases, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal phases: %w", err)
+	if err := jsonfile.Write(path, phases); err != nil {
+		return fmt.Errorf("write phases: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return nil
 }
 
 // CheckCompletion reports which phases completed (all ExpectedOutputs
