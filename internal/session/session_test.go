@@ -91,6 +91,7 @@ func TestResults_WriteTo_ProducesExpectedShape(t *testing.T) {
 		Status:          "succeeded",
 		ExitCode:        0,
 		DurationSeconds: 2700,
+		AcpConnectionID: "conn-abc123",
 		Git: GitInfo{
 			TargetBranch:  "konveyor/migrate-app-123",
 			Commits:       12,
@@ -123,5 +124,41 @@ func TestResults_WriteTo_ProducesExpectedShape(t *testing.T) {
 	}
 	if gitField["commits"] != float64(12) {
 		t.Errorf("expected commits field, got %v", gitField)
+	}
+	if raw["acp_connection_id"] != "conn-abc123" {
+		t.Errorf("expected acp_connection_id field, got %v", raw["acp_connection_id"])
+	}
+}
+
+func TestResults_WriteTo_OmitsEmptyAcpConnectionID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.json")
+
+	r := Results{
+		Status:          "succeeded",
+		ExitCode:        0,
+		DurationSeconds: 2700,
+		Git: GitInfo{
+			TargetBranch:  "konveyor/migrate-app-123",
+			Commits:       12,
+			LastCommitSHA: "abc1234",
+		},
+	}
+
+	if err := r.WriteTo(path); err != nil {
+		t.Fatalf("WriteTo failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected results.json to exist: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("results.json is not valid JSON: %v", err)
+	}
+	if _, hasField := raw["acp_connection_id"]; hasField {
+		t.Error("expected acp_connection_id to be omitted from JSON when empty")
 	}
 }

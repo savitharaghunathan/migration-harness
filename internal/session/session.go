@@ -64,6 +64,7 @@ type Results struct {
 	Status          string  `json:"status"`
 	ExitCode        int     `json:"exit_code"`
 	DurationSeconds int     `json:"duration_seconds"`
+	AcpConnectionID string  `json:"acp_connection_id,omitempty"`
 	Git             GitInfo `json:"git"`
 }
 

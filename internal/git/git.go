@@ -28,6 +28,13 @@ type Credentials struct {
 // CredentialsFromEnv reads KONVEYOR_GIT_USERNAME and KONVEYOR_GIT_TOKEN.
 // These are injected by the controller via envFrom/secretRef (PR #295),
 // not a mounted credential file.
+//
+// Known limitation: this is also, from the other side, what makes
+// agent-invoked konveyor-push calls fail today — launchGoose strips these
+// same env vars from the agent's environment by design, so CredentialsFromEnv
+// finds nothing to read when called from within the agent's process tree.
+// See docs/superpowers/specs/2026-07-02-harness-restructure-design.md's
+// known-limitations section for the planned push-broker fix.
 func CredentialsFromEnv() (Credentials, error) {
 	username := os.Getenv("KONVEYOR_GIT_USERNAME")
 	token := os.Getenv("KONVEYOR_GIT_TOKEN")

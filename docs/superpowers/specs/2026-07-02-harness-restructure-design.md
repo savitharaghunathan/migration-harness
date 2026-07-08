@@ -242,6 +242,24 @@ handshake and isn't otherwise exposed anywhere the controller can read
 it yet (not written to a file, not in an env var). This is a real gap
 to close when the controller side is actually built.
 
+**Known limitation**: agent-invoked `konveyor-push` calls (used throughout
+`skills/plan`, `skills/execute`, `skills/verify`, `skills/orchestrator`)
+currently fail. `launchGoose` strips `KONVEYOR_GIT_USERNAME`/`KONVEYOR_GIT_TOKEN`
+from the agent's environment (required — the agent must never hold git push
+credentials), but `konveyor-push` needs those same env vars to authenticate,
+so every agent-triggered push errors out. Two fixes were scoped and
+discussed: (a) a local push-broker — the harness starts a Unix domain socket
+before launching the agent; `konveyor-push` talks to the broker instead of
+reading env vars directly; the harness (which still holds real credentials)
+performs the actual push. Zero SKILL.md changes needed. (b) a harness-side
+background auto-committer — remove the `konveyor-push` calls from all skill
+files; the harness periodically commits/pushes any working-tree changes on
+a timer using credentials it already has. Trade-off: (a) preserves
+per-step commit messages but adds an IPC mechanism; (b) is structurally
+simpler but loses per-step commit granularity (generic timer-driven commit
+messages instead of "konveyor: migrate \<file\>"). Deferred for POC; (a)
+is the recommended direction when this is picked up.
+
 ### Observability Ownership (Controller reads ACP, not files)
 
 Per the controller enhancement, the controller connects to the agent's

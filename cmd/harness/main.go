@@ -115,6 +115,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("connect to acp: %w", err)
 	}
+	fmt.Fprintf(os.Stdout, "konveyor-harness: acp connection id: %s\n", client.ConnectionID())
 	defer client.Close(ctx)
 
 	if err := client.Initialize(ctx); err != nil {
@@ -210,6 +211,7 @@ func run() error {
 		Status:          resultsStatus,
 		ExitCode:        exitCode,
 		DurationSeconds: durationSeconds,
+		AcpConnectionID: client.ConnectionID(),
 		Git:             sess.Git,
 	}
 	if err := os.MkdirAll("/.konveyor", 0755); err != nil {
@@ -258,19 +260,29 @@ func runDetect(repoDir string) error {
 
 func launchGoose(secretKey string) (*exec.Cmd, error) {
 	cmd := exec.Command("goose", "serve", "--port", "4000")
-	// The agent (goose) must never receive git push credentials directly,
-	// even though it inherits most of the harness's environment for other
-	// purposes (LLM provider credentials, PATH, HOME, etc.) — see the
-	// design spec's credential handling section. internal/git owns the
-	// names of the credential env vars, so it also owns how to filter
-	// them out.
-	cmd.Env = append(git.FilterCredentials(os.Environ()), "GOOSE_SERVER__SECRET_KEY="+secretKey)
+	cmd.Env = gooseEnv(secretKey)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start goose serve: %w", err)
 	}
 	return cmd, nil
+}
+
+// gooseEnv builds the environment goose serve is launched with. The agent
+// (goose) must never receive git push credentials directly, even though it
+// inherits most of the harness's environment for other purposes (LLM
+// provider credentials, PATH, HOME, etc.) — see the design spec's credential
+// handling section. internal/git owns the names of the credential env vars,
+// so it also owns how to filter them out.
+//
+// Known limitation: this filtering means agent-invoked konveyor-push calls
+// will fail today (no KONVEYOR_GIT_USERNAME/KONVEYOR_GIT_TOKEN to authenticate
+// with) — see docs/superpowers/specs/2026-07-02-harness-restructure-design.md's
+// known-limitations section for the planned fix.
+func gooseEnv(secretKey string) []string {
+	env := git.FilterCredentials(os.Environ())
+	return append(env, "GOOSE_SERVER__SECRET_KEY="+secretKey)
 }
 
 // stopGoose sends an interrupt and waits up to 10s before force-killing.
