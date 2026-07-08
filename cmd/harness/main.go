@@ -115,7 +115,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("connect to acp: %w", err)
 	}
-	fmt.Fprintf(os.Stdout, "konveyor-harness: acp connection id: %s\n", client.ConnectionID())
 	defer client.Close(ctx)
 
 	if err := client.Initialize(ctx); err != nil {
@@ -157,6 +156,7 @@ func run() error {
 
 	gitInfo := session.GitInfo{
 		TargetBranch: params.TargetBranch,
+		SourceURL:    params.SourceURL,
 	}
 	if commits, err := git.CommitCount(repoDir); err != nil {
 		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: failed to get commit count: %v\n", err)
@@ -201,6 +201,23 @@ func run() error {
 		return fmt.Errorf("push session.json: %w", err)
 	}
 
+	// results.json describes final state after everything, including the
+	// session.json push above (which creates its own commit). Recompute
+	// commit count/HEAD SHA fresh rather than reusing the pre-push gitInfo
+	// snapshot used for session.json, so results.json's git block doesn't
+	// lag session.json's own commit by one.
+	finalGitInfo := gitInfo
+	if commits, err := git.CommitCount(repoDir); err != nil {
+		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: failed to get post-push commit count: %v\n", err)
+	} else {
+		finalGitInfo.Commits = commits
+	}
+	if sha, err := git.HeadSHA(repoDir); err != nil {
+		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: failed to get post-push HEAD sha: %v\n", err)
+	} else {
+		finalGitInfo.LastCommitSHA = sha
+	}
+
 	exitCode := 0
 	resultsStatus := "succeeded"
 	if finalStatus != "complete" {
@@ -211,8 +228,7 @@ func run() error {
 		Status:          resultsStatus,
 		ExitCode:        exitCode,
 		DurationSeconds: durationSeconds,
-		AcpConnectionID: client.ConnectionID(),
-		Git:             sess.Git,
+		Git:             finalGitInfo,
 	}
 	if err := os.MkdirAll("/.konveyor", 0755); err != nil {
 		return fmt.Errorf("create /.konveyor: %w", err)

@@ -34,6 +34,7 @@ func TestSession_WriteTo_ProducesExpectedShape(t *testing.T) {
 		StepsFailed:    []string{},
 		Git: GitInfo{
 			TargetBranch:  "konveyor/migrate-app-123",
+			SourceURL:     "https://github.com/acme/legacy-app.git",
 			Commits:       12,
 			LastCommitSHA: "abc1234",
 		},
@@ -81,6 +82,9 @@ func TestSession_WriteTo_ProducesExpectedShape(t *testing.T) {
 	if gitField["last_commit_sha"] != "abc1234" {
 		t.Errorf("expected last_commit_sha field, got %v", gitField)
 	}
+	if gitField["source_url"] != "https://github.com/acme/legacy-app.git" {
+		t.Errorf("expected source_url field, got %v", gitField)
+	}
 }
 
 func TestResults_WriteTo_ProducesExpectedShape(t *testing.T) {
@@ -91,9 +95,9 @@ func TestResults_WriteTo_ProducesExpectedShape(t *testing.T) {
 		Status:          "succeeded",
 		ExitCode:        0,
 		DurationSeconds: 2700,
-		AcpConnectionID: "conn-abc123",
 		Git: GitInfo{
 			TargetBranch:  "konveyor/migrate-app-123",
+			SourceURL:     "https://github.com/acme/legacy-app.git",
 			Commits:       12,
 			LastCommitSHA: "abc1234",
 		},
@@ -125,12 +129,12 @@ func TestResults_WriteTo_ProducesExpectedShape(t *testing.T) {
 	if gitField["commits"] != float64(12) {
 		t.Errorf("expected commits field, got %v", gitField)
 	}
-	if raw["acp_connection_id"] != "conn-abc123" {
-		t.Errorf("expected acp_connection_id field, got %v", raw["acp_connection_id"])
+	if gitField["source_url"] != "https://github.com/acme/legacy-app.git" {
+		t.Errorf("expected source_url field, got %v", gitField)
 	}
 }
 
-func TestResults_WriteTo_OmitsEmptyAcpConnectionID(t *testing.T) {
+func TestResults_WriteTo_OmitsEmptySourceURL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "results.json")
 
@@ -158,7 +162,11 @@ func TestResults_WriteTo_OmitsEmptyAcpConnectionID(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("results.json is not valid JSON: %v", err)
 	}
-	if _, hasField := raw["acp_connection_id"]; hasField {
-		t.Error("expected acp_connection_id to be omitted from JSON when empty")
+	gitField, ok := raw["git"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected git field to be an object, got %v", raw["git"])
+	}
+	if _, hasField := gitField["source_url"]; hasField {
+		t.Error("expected source_url to be omitted from JSON when empty")
 	}
 }

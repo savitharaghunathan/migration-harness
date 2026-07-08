@@ -24,6 +24,7 @@ type ModelUsage struct {
 // drifting to different field names (a bug caught in spec review).
 type GitInfo struct {
 	TargetBranch  string `json:"target_branch"`
+	SourceURL     string `json:"source_url,omitempty"`
 	Commits       int    `json:"commits"`
 	LastCommitSHA string `json:"last_commit_sha"`
 }
@@ -64,7 +65,6 @@ type Results struct {
 	Status          string  `json:"status"`
 	ExitCode        int     `json:"exit_code"`
 	DurationSeconds int     `json:"duration_seconds"`
-	AcpConnectionID string  `json:"acp_connection_id,omitempty"`
 	Git             GitInfo `json:"git"`
 }
 
