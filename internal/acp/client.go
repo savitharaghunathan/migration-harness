@@ -66,6 +66,7 @@ type Notification struct {
 type Client struct {
 	conn         *websocket.Conn
 	connectionID string
+	readCancel   context.CancelFunc
 
 	nextID  int64
 	mu      sync.Mutex
@@ -106,7 +107,10 @@ func WaitReady(ctx context.Context, baseURL string, timeout time.Duration) error
 
 // Connect dials baseURL's /acp endpoint over WebSocket (rewriting
 // http(s):// to ws(s):// itself) and starts the background read loop
-// that demultiplexes responses (matched by id) from notifications.
+// that demultiplexes responses (matched by id) from notifications. The
+// read loop's blocking reads are tied to a context derived from ctx, so
+// cancelling ctx (or calling Close) unblocks the read loop rather than
+// leaving it parked on the socket forever.
 func Connect(ctx context.Context, baseURL string) (*Client, error) {
 	wsURL, err := toWebSocketURL(baseURL)
 	if err != nil {
@@ -118,13 +122,15 @@ func Connect(ctx context.Context, baseURL string) (*Client, error) {
 		return nil, fmt.Errorf("dial acp websocket: %w", err)
 	}
 
+	readCtx, readCancel := context.WithCancel(ctx)
 	c := &Client{
 		conn:          conn,
 		connectionID:  resp.Header.Get("Acp-Connection-Id"),
+		readCancel:    readCancel,
 		pending:       make(map[int64]chan rpcEnvelope),
 		notifications: make(chan Notification, 64),
 	}
-	go c.readLoop()
+	go c.readLoop(readCtx)
 	return c, nil
 }
 
@@ -156,9 +162,12 @@ func (c *Client) Notifications() <-chan Notification {
 	return c.notifications
 }
 
-func (c *Client) readLoop() {
+// readLoop blocks reading frames off the connection until ctx is
+// cancelled or the connection fails. ctx is derived from the context
+// passed into Connect and is also cancelled by Close, so this goroutine
+// never outlives the Client's lifecycle.
+func (c *Client) readLoop(ctx context.Context) {
 	defer close(c.notifications)
-	ctx := context.Background()
 	for {
 		_, data, err := c.conn.Read(ctx)
 		if err != nil {
@@ -315,9 +324,11 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (PromptResu
 	return pr, nil
 }
 
-// Close closes the underlying WebSocket connection. Any calls still
-// blocked in call() waiting on a response are proactively failed here
-// (rather than left to hang until their own context expires) by
+// Close closes the underlying WebSocket connection and cancels the
+// readLoop's context so its blocking read unblocks even if the
+// connection close doesn't promptly surface as a read error. Any calls
+// still blocked in call() waiting on a response are proactively failed
+// here (rather than left to hang until their own context expires) by
 // draining c.pending and sending a failure envelope to each waiter
 // before the connection is closed. Closing the connection will also
 // cause the readLoop to hit a read error and invoke failAllPending, but
@@ -335,5 +346,6 @@ func (c *Client) Close(ctx context.Context) error {
 		ch <- closeErr
 	}
 
+	c.readCancel()
 	return c.conn.Close(websocket.StatusNormalClosure, "")
 }
