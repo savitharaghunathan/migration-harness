@@ -2,9 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"os"
 
+	"github.com/konveyor/migration-harness/internal/cliutil"
 	"github.com/konveyor/migration-harness/internal/session"
 )
 
@@ -17,8 +16,7 @@ func main() {
 
 	res := buildResults(*exitCode, *targetBranch, *commits, *lastCommitSHA)
 	if err := res.WriteTo("/.konveyor/results.json"); err != nil {
-		fmt.Fprintln(os.Stderr, "konveyor-results: "+err.Error())
-		os.Exit(1)
+		cliutil.Fatal("konveyor-results", err)
 	}
 }
 

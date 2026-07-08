@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -32,5 +34,36 @@ func TestParseArgs_NoFilesMeansStageAll(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("expected no files, got %v", files)
+	}
+}
+
+// TestRun_ReturnsErrorWhenCredentialsMissing exercises run()'s
+// validation deterministically: with git credentials absent from the
+// environment, run() must fail before ever touching a git repo or the
+// network.
+func TestRun_ReturnsErrorWhenCredentialsMissing(t *testing.T) {
+	origUser, hadUser := os.LookupEnv("KONVEYOR_GIT_USERNAME")
+	origToken, hadToken := os.LookupEnv("KONVEYOR_GIT_TOKEN")
+	t.Cleanup(func() {
+		if hadUser {
+			os.Setenv("KONVEYOR_GIT_USERNAME", origUser)
+		} else {
+			os.Unsetenv("KONVEYOR_GIT_USERNAME")
+		}
+		if hadToken {
+			os.Setenv("KONVEYOR_GIT_TOKEN", origToken)
+		} else {
+			os.Unsetenv("KONVEYOR_GIT_TOKEN")
+		}
+	})
+	os.Unsetenv("KONVEYOR_GIT_USERNAME")
+	os.Unsetenv("KONVEYOR_GIT_TOKEN")
+
+	err := run([]string{"a.txt"})
+	if err == nil {
+		t.Fatal("expected an error when git credentials are missing, got none")
+	}
+	if !strings.Contains(err.Error(), "KONVEYOR_GIT_USERNAME") {
+		t.Errorf("expected error to mention missing credentials, got: %v", err)
 	}
 }

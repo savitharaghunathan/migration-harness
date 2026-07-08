@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/konveyor/migration-harness/internal/acp"
+	"github.com/konveyor/migration-harness/internal/cliutil"
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/git"
 	"github.com/konveyor/migration-harness/internal/phases"
@@ -23,12 +24,10 @@ const (
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: konveyor-harness run")
-		os.Exit(1)
+		cliutil.Usage("usage: konveyor-harness run")
 	}
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "konveyor-harness: "+err.Error())
-		os.Exit(1)
+		cliutil.Fatal("konveyor-harness", err)
 	}
 }
 

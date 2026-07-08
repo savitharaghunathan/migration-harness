@@ -6,18 +6,17 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/konveyor/migration-harness/internal/cliutil"
 	"github.com/konveyor/migration-harness/internal/detect"
 	"github.com/konveyor/migration-harness/internal/jsonfile"
 )
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: konveyor-detect <repo-path>")
-		os.Exit(1)
+		cliutil.Usage("usage: konveyor-detect <repo-path>")
 	}
 	if err := run(os.Args[1]); err != nil {
-		fmt.Fprintln(os.Stderr, "konveyor-detect: "+err.Error())
-		os.Exit(1)
+		cliutil.Fatal("konveyor-detect", err)
 	}
 }
 
