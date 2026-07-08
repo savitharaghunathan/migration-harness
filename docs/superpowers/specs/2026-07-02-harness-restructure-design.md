@@ -19,11 +19,12 @@ enhancement (PR #295) and agent-base-image-composition enhancement (PR #296).
 │  │  4. konveyor-detect (graphify, no LLM)             │  │
 │  │  5. konveyor-push (push detect artifacts)          │  │
 │  │  6. Write instructions.md, generate phases.json    │  │
-│  │  7. Launch goose serve, open session, subscribe to │  │
-│  │     its event stream, send session/prompt (ack)    │  │
-│  │  8. Consume stream until terminal event; check     │  │
-│  │     phases.json outputs on disk; SIGTERM goose      │  │
-│  │     serve and wait for it to stop                  │  │
+│  │  7. Launch goose serve, dial ws://.../acp,          │  │
+│  │     JSON-RPC: initialize → session/new →            │  │
+│  │     session/prompt (BLOCKS until turn completes)    │  │
+│  │  8. Response carries stopReason+usage directly;     │  │
+│  │     check phases.json outputs on disk; SIGTERM      │  │
+│  │     goose serve and wait for it to stop             │  │
 │  │  9. konveyor-push (session.json; skill already     │  │
 │  │     pushed handoff.md before session ended)        │  │
 │  │ 10. konveyor-results (pod-local results)           │  │
@@ -31,10 +32,11 @@ enhancement (PR #295) and agent-base-image-composition enhancement (PR #296).
 │                 │ launches                                │
 │                 ▼                                         │
 │  ┌────────────────────────────────────────────────────┐  │
-│  │  goose serve (agent runtime, ACP over HTTP)        │  │
-│  │  Harness drives the session over ACP (session/new, │  │
-│  │  session/prompt) — same endpoint the controller/UI  │  │
-│  │  use for observability                              │  │
+│  │  goose serve (agent runtime, ACP over WebSocket)    │  │
+│  │  Harness drives the session over WebSocket JSON-RPC │  │
+│  │  (initialize, session/new, session/prompt) — a      │  │
+│  │  controller can attach a read-only SSE observer to  │  │
+│  │  the same connection via Acp-Connection-Id          │  │
 │  │                                                    │  │
 │  │  Meta-skill reads phases.json, sequences:          │  │
 │  │    Phase 1: plan       → loads plan SKILL.md        │  │
@@ -124,140 +126,148 @@ konveyor-harness version
 
 ### Launching and Driving Goose
 
+**CONFIRMED against a real `goose serve` instance** (see
+`docs/superpowers/plans/acp-verification-runbook.md` for the exact
+procedure used) — this section previously documented an inferred,
+unverified design; every claim below has been empirically verified.
+
 `goose run` and `goose serve` start independent sessions — a `goose run`
 process would not share state with a `goose serve` instance already
 listening on port 4000. Since PR #295 requires `goose serve` for ACP
-observability (controller and UI connect to `/acp`), the harness also
-uses `goose serve` to drive the actual work, rather than shelling out to
-a separate `goose run` invocation.
+observability (controller connects to `/acp`), the harness also uses
+`goose serve` to drive the actual work, rather than shelling out to a
+separate `goose run` invocation.
 
-**The harness drives the session by consuming its event stream, not by
-polling a status endpoint.** ACP exposes this over Streamable HTTP
-and/or WebSocket — goose does not support the older SSE transport, per
-goose's own docs — so `session/prompt` is treated as fire-and-forget
-(acks receipt, does not block for the full pipeline duration), and the
-harness's `internal/acp` client stays subscribed to the session's event
-stream until it sees a terminal event. This resolves the
-poll-vs-blocking-call ambiguity: there is no separate poll loop, there
-is one continuously-consumed stream.
+**The real transport is WebSocket, not plain HTTP POST/GET, and not
+SSE for driving.** `goose serve`'s `/acp` endpoint requires a WebSocket
+upgrade handshake; the server returns an `Acp-Connection-Id` response
+header on the `101 Switching Protocols` response. All driving happens
+as JSON-RPC 2.0 messages over that single WebSocket connection —
+requests/responses and server-initiated notifications are multiplexed
+on the same socket. A bare HTTP GET or POST to `/acp` (no WebSocket
+upgrade) returns 4xx errors demanding either an `Accept:
+text/event-stream` header or an already-established
+`Acp-Connection-Id` — this is the read-only *observer* path (see
+"Controller Observability" below), not how the harness itself drives.
 
-Also confirmed: `goose serve` requires an auth secret
-(`GOOSE_SERVER__SECRET_KEY`, or `--dangerously-unauthenticated` for
-local dev only) — `konveyor-configure` must set this before launch, see
-konveyor-configure below.
+**`session/prompt` blocks until the turn completes — it is not
+fire-and-forget.** This was the single biggest wrong assumption in the
+prior design. The JSON-RPC response to `session/prompt` only arrives
+once the agent's full turn finishes, and it carries `stopReason` and
+`usage` (`totalTokens`/`inputTokens`/`outputTokens`) directly:
 
-```
-1. Launch: GOOSE_SERVER__SECRET_KEY=<generated> goose serve --port 4000 &
-2. Poll http://localhost:4000/acp until it responds (session endpoint ready)
-3. ACP call: POST /acp  { method: "session/new" }  → session_id
-4. Open the session's event stream (Streamable HTTP or WebSocket) and subscribe
-5. ACP call: POST /acp  { method: "session/prompt", session_id,
-     message: "Load skill $KONVEYOR_SKILLS_DIR/orchestrator/SKILL.md.
-                Instructions: <contents of instructions.md>.
-                phases.json is at /workspace/repo/phases.json." }
-   (this call acks receipt — it does not block until the pipeline finishes)
-6. Consume the event stream:
-   - Accumulate token usage from usage-bearing events as they arrive
-     (session.json's token_usage is a running total from the stream,
-     not a single end-of-session value)
-   - Watch for a terminal event (session complete or failed)
-7. On terminal event: stop consuming, read /workspace/repo/ on disk to
-   determine which of phases.json's expected_outputs actually exist —
-   this is how steps_completed / steps_failed in session.json is built,
-   since the stream's terminal event only reports overall session
-   status, not per-phase status
-8. Controller and UI may connect to the same /acp endpoint concurrently
-   during this window (while the harness is subscribed) for
-   observability — ACP's session/load replays history on connect
-9. After the terminal event, before the harness exits: send SIGTERM to
-   the backgrounded goose serve process and wait for it to stop (bounded
-   timeout) — the container's lifetime is the harness's lifetime, so
-   there is no window for observability after the harness decides to
-   exit; goose serve must be stopped explicitly, not left to be killed
-   by the container runtime tearing down the pod
+```json
+{"jsonrpc":"2.0","result":{"stopReason":"end_turn","usage":{"totalTokens":11286,"inputTokens":11238,"outputTokens":48}},"id":3}
 ```
 
-**Needs verification during implementation**: the exact ACP method and
-event names (`session/new`, `session/prompt`, the terminal event type,
-whether usage data is actually emitted on the stream, `session/load`'s
-replay behavior) are inferred from PR #295's description of the ACP
-protocol and the high-level ACP/goose docs, not confirmed against
-goose's actual wire protocol — neither goose's ACP client docs
-(goose-docs.ai) nor the ACP spec's overview page (agentclientprotocol.com)
-publish method names, payload shapes, or completion signaling at the
-level of detail needed to implement `internal/acp`; that requires
-reading goose's source or the ACP JSON schema directly. This whole
-mechanism — event-stream-driven session control — is the biggest
-unverified assumption in this spec and should be prototyped against a
-real `goose serve` instance before committing to `internal/acp`'s
-design. If goose's ACP implementation doesn't support streaming usage
-or per-event granularity, the phases.json-expected-outputs fallback in
-step 7 still works for step completion tracking, but token_usage would
-need a different source (e.g., goose's own logs, or a metrics event we
-haven't confirmed exists).
+This means **no separate event-stream-consumption loop is needed to
+detect completion or collect token usage** — awaiting the blocking RPC
+call is sufficient. `session/update` notifications (message chunks,
+thought chunks, live usage snapshots) still arrive on the same
+WebSocket during the turn, but consuming them is optional — useful only
+for live progress logging, not required for correctness.
 
-Also worth noting: the Agent Client Protocol's own overview
-distinguishes local agents (stdio JSON-RPC — the mature, fully-supported
-path) from remote agents (HTTP/WebSocket — explicitly described as
-"a work in progress"). `goose serve`'s HTTP/WebSocket ACP endpoint,
-which this design builds on for both driving and observability, falls
-into the less-mature remote-agent category. This was a deliberate
-choice (see Open Questions) to keep driving and observability unified
-on one endpoint rather than splitting to a stdio-based `goose acp` for
-driving — accepted as a real risk given the protocol's own
-work-in-progress label on this transport.
+**Confirmed real protocol sequence:**
 
-### Known Unknowns — Requires Prototyping
+```
+1. Launch: GOOSE_SERVER__SECRET_KEY=<generated or controller-supplied> goose serve --port 4000 &
+2. Poll http://localhost:4000/acp with a bare GET until it responds at
+   all (connection accepted) — confirms the process is listening.
+   Any response (even a 4xx) means it's up; connection-refused means not yet.
+3. Dial ws://localhost:4000/acp (WebSocket upgrade).
+   Capture Acp-Connection-Id from the upgrade response header — this is
+   what a controller would need to attach an observer (see below).
+4. JSON-RPC over the WebSocket:
+   → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1.0","clientInfo":{...}}}
+   ← {"jsonrpc":"2.0","result":{"agentCapabilities":{...},"authMethods":[...]},"id":1}
+5. → {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/workspace/repo","mcpServers":[]}}
+   ← {"jsonrpc":"2.0","result":{"sessionId":"20260708_2","modes":{...},"models":{...}},"id":2}
+   (sessionId is a date-based string, e.g. "20260708_2" — not a UUID)
+6. → {"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"20260708_2","prompt":[{"type":"text","text":"Load skill $KONVEYOR_SKILLS_DIR/orchestrator/SKILL.md. Instructions: <contents of instructions.md>. phases.json is at /workspace/repo/phases.json."}]}}
+   (this call BLOCKS — does not return until the full turn completes)
+   ... session/update notifications may arrive on the same socket while waiting, optional to consume ...
+   ← {"jsonrpc":"2.0","result":{"stopReason":"end_turn","usage":{"totalTokens":N,"inputTokens":N,"outputTokens":N}},"id":3}
+7. Read /workspace/repo/ on disk to determine which of phases.json's
+   expected_outputs actually exist — this is how steps_completed /
+   steps_failed in session.json is built, since session/prompt's
+   response only reports overall turn status, not per-phase status
+8. Send SIGTERM to the backgrounded goose serve process and wait for it
+   to stop (bounded timeout) — the container's lifetime is the
+   harness's lifetime, so goose serve must be stopped explicitly, not
+   left to be killed by the container runtime tearing down the pod
+```
 
-The event-stream mechanism above is a design hypothesis, not a verified
-design. The following are genuine open engineering questions that
-prototyping against a real `goose serve` instance should answer —
-deliberately not resolved further here, since guessing at mechanism
-details without being able to test them just produces more prose to
-contradict later:
+**Only `"end_turn"` is treated as success.** Other possible
+`stopReason` values (e.g. hitting a turn limit, an error, a refusal)
+were not observed during verification — treat anything other than
+`"end_turn"` as a failure for now (fail-closed), and expand this list
+as real failure modes are observed in practice.
 
-- **Subscription race**: does `session/new` start agent work
-  immediately, or only once `session/prompt` is sent? If the former,
-  the harness must confirm its stream subscription is fully
-  established before treating the session as ready, or early events
-  (including early usage/failure signals) could be silently missed.
-- **Transport**: confirmed goose does not support SSE — it's Streamable
-  HTTP and/or WebSocket. These are still materially different to
-  implement (chunked HTTP response parsing vs framed WebSocket
-  messages, different reconnect semantics). Which one goose's ACP
-  endpoint actually uses (or whether it's client-negotiable) needs to
-  be confirmed before writing `internal/acp`'s stream client.
-- **Error and reconnect handling**: if the stream connection drops
-  before a terminal event (network blip, goose crash), does the
-  harness reconnect and replay via `session/load`, treat it as a
-  failure, or hang? A bounded timeout on stream consumption is a
-  minimum requirement regardless of the answer, so the harness can
-  always reach its own SIGTERM-and-exit path rather than depending on
-  an external Kubernetes timeout to kill the pod.
-- **Conflicting completion signals**: if the terminal event reports
-  `failed` but expected_outputs exist on disk (or the reverse), which
-  signal wins for session.json's top-level `status`? Needs a rule once
-  real behavior is observed, not a guess now.
-- **Per-role usage attribution**: if a run uses multiple models by
-  role, can a usage-bearing stream event be attributed to a specific
-  role, or does goose only report aggregate usage? This determines
-  whether session.json's per-role `token_usage` (in the `models` list)
-  is achievable as designed or needs to fall back to a single
-  aggregate figure.
-- **Controller/UI auth to `/acp`**: `goose serve` requires
-  `GOOSE_SERVER__SECRET_KEY`. The harness now supports an optional
-  `KONVEYOR_GOOSE_SECRET_KEY` env var (`internal/config.SecretKey()`):
-  if set, that value is used directly as the secret; otherwise the
-  harness falls back to generating one randomly per-run, as before.
-  This makes the harness *ready* to accept a controller-supplied
-  secret, but it does not by itself make the "controller and UI may
-  connect concurrently for observability" claim real — the controller
-  side (a separate repo) still needs to actually generate a secret and
-  inject it via this env var (and the UI needs a way to learn it in
-  turn). Until that controller-side mechanism is designed and built,
-  runs without `KONVEYOR_GOOSE_SECRET_KEY` set still generate a random
-  secret known only to the harness, and observability access does not
-  actually work yet.
+**WebSocket client library**: Go's standard library has no WebSocket
+client. `internal/acp` uses `github.com/coder/websocket` (ISC license,
+OSS) — the one exception to this project's stdlib-only rule, adopted
+because implementing RFC 6455 framing by hand (masking, ping/pong,
+close handshake) is not a good use of effort for a POC. Chosen over
+`gorilla/websocket` for its `context.Context`-native API, which matches
+this codebase's existing cancellation patterns.
+
+### Controller Observability (SSE) — Confirmed, Narrower Than Assumed
+
+A controller can attach a **read-only observer** to the harness's
+active session: `GET /acp` with `Accept: text/event-stream` and the
+`Acp-Connection-Id` header set to the value the harness's own WebSocket
+handshake received. This does open a real SSE stream (confirmed, status
+200, `content-type: text/event-stream`).
+
+**However, this SSE stream only relays completed request/response
+pairs — not live `session/update` notifications.** Verified twice,
+including with raw unbuffered reads and explicit timestamps, ruling out
+a buffering artifact: the SSE observer saw the `initialize` result, the
+`session/new` result, and the final `session/prompt` result (each
+exactly matching what arrived on the driving WebSocket), but received
+**zero** of the interleaved `session/update` notifications (message
+chunks, thought chunks, live usage snapshots) that arrived on the
+WebSocket during the same window. A controller watching via SSE sees
+"session created" and "turn completed, here's the token count," not
+live token-by-token progress.
+
+This satisfies PR #295's stated need (controller writes AgentRun CR
+status at lifecycle transitions only — started/completed/failed, not
+live streaming) — see "Observability Ownership" below — but is a real,
+confirmed limitation if fuller live observability is ever wanted.
+
+**Still unresolved**: how the controller obtains the `Acp-Connection-Id`
+in the first place, since it's minted by the harness's own WebSocket
+handshake and isn't otherwise exposed anywhere the controller can read
+it yet (not written to a file, not in an env var). This is a real gap
+to close when the controller side is actually built.
+
+### Observability Ownership (Controller reads ACP, not files)
+
+Per the controller enhancement, the controller connects to the agent's
+ACP endpoint directly (as described above) for status, and writes
+AgentRun CR status only at lifecycle transitions (started, completed,
+failed) — not by polling harness-written files. Concretely:
+
+- The harness does **not** update any Kubernetes CR itself (no SA
+  token, no Kubernetes API calls from inside the container) — the
+  controller owns that, driven by its own ACP connection.
+- The harness's `.konveyor/session.json` (committed to git) is a
+  **post-run audit trail**, not the live observability channel — the
+  controller's live view comes from ACP, not from this file.
+- `/.konveyor/results.json` (pod-local) is retained as a **fallback**
+  for cases where a controller isn't attached via ACP (e.g. standalone
+  CLI-style runs without a controller) — not the controller's primary
+  status source, but still written by the harness so pod-local
+  tooling has something to read after the container exits.
+
+### Context Budget: Out of Scope for the POC
+
+Context budget validation (counting rule/skill token sizes against a
+model's context window before a run starts) is explicitly deferred by
+the controller enhancement. The harness has no logic related to this
+and should not gain any — it is not this project's responsibility for
+the POC.
 
 ### konveyor-clone
 
@@ -412,16 +422,18 @@ Container starts → konveyor-harness run
 │
 ├─ 6. LAUNCH GOOSE AND DRIVE THE SESSION
 │    goose serve --port 4000 &
-│    Poll /acp until ready
-│    session/new → session_id, open event stream, subscribe
-│    session/prompt (fire-and-forget ack): load orchestrator skill,
-│      pass instructions.md contents and phases.json path
+│    Poll /acp with a bare GET until it responds (process is listening)
+│    Dial ws://localhost:4000/acp — capture Acp-Connection-Id from the
+│      upgrade response header
+│    JSON-RPC: initialize → session/new (cwd=/workspace/repo) → session_id
+│    JSON-RPC: session/prompt (BLOCKS until the turn completes): load
+│      orchestrator skill, pass instructions.md contents and phases.json path
 │    Meta-skill reads phases.json, sequences LLM phases
 │    Skills call konveyor-push at meaningful checkpoints
 │    Before the session ends, the orchestration skill writes and pushes
 │      .konveyor/handoff.md itself
-│    Harness accumulates token usage from the event stream as it consumes it
-│    Event stream emits terminal event (complete or failed)
+│    session/prompt's response carries stopReason + usage directly —
+│      no separate stream-consumption loop needed for completion or usage
 │    Harness checks phases.json's expected_outputs on disk to determine
 │      steps_completed / steps_failed
 │    Harness sends SIGTERM to goose serve, waits for it to stop
@@ -522,8 +534,8 @@ because it has timing, token usage, and phase completion data:
 tracked directly by the harness from `konveyor-detect`'s own exit code
 (it's a Go call the harness makes itself, not a phases.json entry).
 `plan`/`execute`/`verify-fix` come from checking phases.json's
-`expected_outputs` on disk after the session's terminal event, per
-"Launching and Driving Goose."
+`expected_outputs` on disk after `session/prompt`'s blocking response
+returns, per "Launching and Driving Goose."
 
 Matches PR #295's model-role convention (`primary`/`efficient`/`planner`,
 `AgentRun.spec.models` as a list keyed by role) — `models` is a list so
@@ -775,12 +787,16 @@ konveyor-harness takes over from there.
 | Push model | Both harness-driven (phase boundaries) and skill-driven (mid-phase) |
 | agent-base entrypoint | No entrypoint on agent-base; entrypoint on runtime images |
 | POC scope | No smart phase skipping, full pipeline every run |
-| goose invocation | `goose serve` + event-stream-driven ACP session (session/new, subscribe, fire-and-forget session/prompt, consume stream to terminal event) — not `goose run`, not polling. **Prototype before committing** — biggest unverified assumption in this spec, see "Launching and Driving Goose" and "Known Unknowns — Requires Prototyping" |
-| Session termination / goose serve lifecycle | Harness SIGTERMs goose serve after the terminal event, before exiting. Observability window is only while the harness is alive and subscribed, not after |
-| Step-level completion tracking | Harness checks phases.json's `expected_outputs` on disk after the terminal event — the ACP terminal event only reports overall session status, not per-phase |
-| Token usage source | Accumulated from the event stream as consumed. **Unverified** whether goose's ACP stream actually emits usage events — fallback (e.g. goose logs) not yet designed |
+| goose invocation | **CONFIRMED**: `goose serve` + WebSocket + JSON-RPC 2.0. `session/prompt` blocks until the turn completes and its response carries `stopReason`+`usage` directly — no event-stream-consumption loop needed for completion detection. See "Launching and Driving Goose" |
+| Session termination / goose serve lifecycle | Harness SIGTERMs goose serve after `session/prompt` returns, before exiting. Controller observability (SSE) only works while the harness is alive and the WebSocket connection is open, not after |
+| Step-level completion tracking | Harness checks phases.json's `expected_outputs` on disk after `session/prompt` returns — its response only reports overall turn status (`stopReason`), not per-phase status |
+| Token usage source | **CONFIRMED**: `session/prompt`'s blocking JSON-RPC response carries `usage: {totalTokens, inputTokens, outputTokens}` directly — no stream accumulation needed |
 | Skill baking vs PR #296 | Pipeline skills baked into image for POC (deviates from PR #296's "never baked in" model). Intentional, to revisit with PR #296 authors. No mount collision — SkillCards mount at `/opt/skills/{name}/`, a subdirectory |
 | instructions.md location | Written to `/workspace/` (not `/workspace/repo/`) so it's never git-tracked or accidentally pushed |
 | KONVEYOR_INSTRUCTIONS | Separate env var from `KONVEYOR_PARAM_*`, matching PR #295's distinction between params and instructions — needs confirmation once the controller is implemented |
 | Git credential delivery | env vars via envFrom/secretRef (matches PR #295's AgentRun examples), not a mounted Secret file path. Push-time re-auth via GIT_ASKPASS helper script |
 | session.json model schema | `models` is a list keyed by `role` (matches PR #295's primary/efficient/planner convention), each with its own token_usage — not a single flat model+usage pair |
+| Controller/UI observability via `/acp` | **CONFIRMED, narrower than assumed**: a controller can attach a read-only SSE observer using the harness's `Acp-Connection-Id`, but it only relays completed request/response pairs, not live `session/update` notifications. How the controller obtains the connection ID is still unresolved — not yet exposed anywhere it can read it |
+| results.json fate | Kept as a pod-local **fallback** (not the controller's primary status source, which is now ACP) — for standalone runs without a controller attached |
+| WebSocket client dependency | `github.com/coder/websocket` (ISC/OSS) — the one exception to the stdlib-only rule, since Go's standard library has no WebSocket client and ACP over `goose serve` requires one |
+| Context budget enforcement | Explicitly out of scope for the POC per the controller enhancement — the harness has no logic for this and should not gain any |
