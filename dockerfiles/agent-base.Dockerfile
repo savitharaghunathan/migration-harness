@@ -20,7 +20,13 @@ COPY bin/konveyor-detect     /usr/local/bin/
 COPY bin/konveyor-results    /usr/local/bin/
 COPY bin/konveyor-harness    /usr/local/bin/
 
-# GIT_ASKPASS helper for konveyor-push re-authentication
+# GIT_ASKPASS helper — enables konveyor-clone/konveyor-push to
+# authenticate without embedding credentials in the git remote URL or
+# passing them via argv. This is part of the credential-isolation
+# design: the agent runtime (goose, installed in agent-base-goose) must
+# never receive git push credentials in its own environment — see
+# cmd/harness/main.go's filteredEnviron/git.FilterCredentials and the
+# design spec's credential handling section.
 COPY scripts/git-askpass.sh /usr/local/bin/git-askpass.sh
 RUN chmod +x /usr/local/bin/git-askpass.sh
 

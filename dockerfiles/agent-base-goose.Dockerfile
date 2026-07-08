@@ -17,5 +17,10 @@ RUN microdnf install -y bzip2 && microdnf clean all \
     && chmod +x /usr/local/bin/goose \
     && rm -f /tmp/goose.tar.bz2
 
+# goose (the agent runtime) is launched by konveyor-harness with a
+# filtered environment — git push credentials (KONVEYOR_GIT_*) are
+# stripped before this process starts. Do NOT add an ENV/secret mount
+# here that reintroduces those credentials into this image's default
+# runtime environment; see internal/git.FilterCredentials.
 ENTRYPOINT ["konveyor-harness"]
 CMD ["run"]

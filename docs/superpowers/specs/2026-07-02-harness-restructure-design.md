@@ -337,9 +337,15 @@ konveyor-detect <repo-path>
 Write pod-local results for the controller.
 
 ```
-konveyor-results --exit-code <N>
+konveyor-results --exit-code <N> [--target-branch <branch>] [--commits <N>] [--last-commit-sha <sha>]
   - Write /.konveyor/results.json
   - Contains: status, exit_code, duration, git branch, last commit SHA
+  - --target-branch/--commits/--last-commit-sha are optional; if
+    omitted, the Git fields default to their zero value (empty
+    string / 0). The harness itself doesn't invoke this binary as a
+    subprocess — it builds session.Results in-process with full git
+    info already available — these flags exist for standalone/manual
+    invocation.
   - Pod-local only — NOT committed to git
   - Written for a pod-local fallback use case (e.g. tooling that
     inspects the running/recently-exited container directly), NOT a
