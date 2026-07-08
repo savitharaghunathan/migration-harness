@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -133,7 +132,9 @@ func run() error {
 
 	var inputTokens, outputTokens int
 	finalStatus := "failed"
+	failureDetail := ""
 	if promptErr != nil {
+		failureDetail = promptErr.Error()
 		fmt.Fprintf(os.Stderr, "konveyor-harness: warning: session/prompt failed: %v\n", promptErr)
 	} else {
 		inputTokens = promptResult.Usage.InputTokens
@@ -141,6 +142,7 @@ func run() error {
 		if promptResult.StopReason == "end_turn" {
 			finalStatus = "complete"
 		} else {
+			failureDetail = fmt.Sprintf("stopReason=%q", promptResult.StopReason)
 			fmt.Fprintf(os.Stderr, "konveyor-harness: warning: session ended with stopReason=%q\n", promptResult.StopReason)
 		}
 	}
@@ -218,7 +220,25 @@ func run() error {
 		return fmt.Errorf("write results.json: %w", err)
 	}
 
-	return nil
+	return finalRunError(finalStatus, failureDetail)
+}
+
+// finalRunError reports whether the migration session itself succeeded,
+// independent of whether all the harness's own bookkeeping (writing
+// session.json/results.json, pushing metadata, etc.) succeeded. run()
+// must propagate this as a non-nil error when the session did not
+// complete, so that main() exits non-zero instead of masking a failed
+// migration as a successful process exit. detail, when non-empty, carries
+// the specific reason (a stopReason or the session/prompt error) for
+// better diagnostics.
+func finalRunError(status, detail string) error {
+	if status == "complete" {
+		return nil
+	}
+	if detail != "" {
+		return fmt.Errorf("migration session did not complete successfully (status=%q): %s", status, detail)
+	}
+	return fmt.Errorf("migration session did not complete successfully (status=%q)", status)
 }
 
 // buildPromptMessage is the initial message sent via session/prompt,
@@ -239,30 +259,19 @@ func runDetect(repoDir string) error {
 
 func launchGoose(secretKey string) (*exec.Cmd, error) {
 	cmd := exec.Command("goose", "serve", "--port", "4000")
-	cmd.Env = append(filteredEnviron(), "GOOSE_SERVER__SECRET_KEY="+secretKey)
+	// The agent (goose) must never receive git push credentials directly,
+	// even though it inherits most of the harness's environment for other
+	// purposes (LLM provider credentials, PATH, HOME, etc.) — see the
+	// design spec's credential handling section. internal/git owns the
+	// names of the credential env vars, so it also owns how to filter
+	// them out.
+	cmd.Env = append(git.FilterCredentials(os.Environ()), "GOOSE_SERVER__SECRET_KEY="+secretKey)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start goose serve: %w", err)
 	}
 	return cmd, nil
-}
-
-// filteredEnviron returns the current process environment with git
-// credential variables removed. The agent (goose) must never receive
-// git push credentials directly, even though it inherits most of the
-// harness's environment for other purposes (LLM provider credentials,
-// PATH, HOME, etc.) — see the design spec's credential handling section.
-func filteredEnviron() []string {
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, kv := range env {
-		if strings.HasPrefix(kv, "KONVEYOR_GIT_") {
-			continue
-		}
-		filtered = append(filtered, kv)
-	}
-	return filtered
 }
 
 // stopGoose sends an interrupt and waits up to 10s before force-killing.

@@ -14,6 +14,11 @@ import (
 // in the container image (see dockerfiles/agent-base.Dockerfile).
 const DefaultAskpassPath = "/usr/local/bin/git-askpass.sh"
 
+// CredentialEnvVarPrefix is the prefix shared by every git credential
+// env var (KONVEYOR_GIT_USERNAME, KONVEYOR_GIT_TOKEN, and any future
+// git-credential-related var added under this same scheme).
+const CredentialEnvVarPrefix = "KONVEYOR_GIT_"
+
 // Credentials holds git push/clone credentials read from the environment.
 type Credentials struct {
 	Username string
@@ -30,6 +35,22 @@ func CredentialsFromEnv() (Credentials, error) {
 		return Credentials{}, fmt.Errorf("KONVEYOR_GIT_USERNAME and KONVEYOR_GIT_TOKEN must both be set")
 	}
 	return Credentials{Username: username, Token: token}, nil
+}
+
+// FilterCredentials returns env (as returned by os.Environ()) with all
+// git credential variables removed. Callers that launch a subprocess
+// which must never receive git push credentials (e.g. the agent
+// runtime) should use this instead of passing os.Environ() through
+// directly.
+func FilterCredentials(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, CredentialEnvVarPrefix) {
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return filtered
 }
 
 // Clone clones rawURL into dest. Credentials are never embedded in the

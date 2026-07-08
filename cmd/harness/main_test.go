@@ -19,27 +19,28 @@ func TestBuildPromptMessage_IncludesSkillsDirInstructionsAndPhasesPath(t *testin
 	}
 }
 
-func TestFilteredEnviron_RemovesGitCredentialsOnly(t *testing.T) {
-	t.Setenv("KONVEYOR_GIT_USERNAME", "some-user")
-	t.Setenv("KONVEYOR_GIT_TOKEN", "super-secret-token")
-	t.Setenv("GOOSE_PROVIDER", "anthropic")
-
-	env := filteredEnviron()
-
-	for _, kv := range env {
-		if strings.HasPrefix(kv, "KONVEYOR_GIT_") {
-			t.Errorf("expected filtered environment to omit KONVEYOR_GIT_* vars, found: %s", kv)
-		}
+func TestFinalRunError_ReturnsNilWhenComplete(t *testing.T) {
+	if err := finalRunError("complete", ""); err != nil {
+		t.Fatalf("expected nil error for status=complete, got: %v", err)
 	}
+}
 
-	found := false
-	for _, kv := range env {
-		if kv == "GOOSE_PROVIDER=anthropic" {
-			found = true
-			break
-		}
+func TestFinalRunError_ReturnsErrorWhenNotComplete(t *testing.T) {
+	err := finalRunError("failed", "")
+	if err == nil {
+		t.Fatal("expected non-nil error for status=failed, got nil")
 	}
-	if !found {
-		t.Errorf("expected filtered environment to retain unrelated vars, GOOSE_PROVIDER=anthropic not found in: %v", env)
+	if !strings.Contains(err.Error(), `status="failed"`) {
+		t.Errorf("expected error to mention status, got: %v", err)
+	}
+}
+
+func TestFinalRunError_IncludesDetailWhenProvided(t *testing.T) {
+	err := finalRunError("failed", `stopReason="max_tokens"`)
+	if err == nil {
+		t.Fatal("expected non-nil error, got nil")
+	}
+	if !strings.Contains(err.Error(), `stopReason="max_tokens"`) {
+		t.Errorf("expected error to include failure detail, got: %v", err)
 	}
 }

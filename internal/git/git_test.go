@@ -205,6 +205,33 @@ func TestCredentialsFromEnv_MissingToken(t *testing.T) {
 	}
 }
 
+func TestFilterCredentials_RemovesGitPrefixedVarsOnly(t *testing.T) {
+	env := []string{
+		"KONVEYOR_GIT_USERNAME=some-user",
+		"KONVEYOR_GIT_TOKEN=super-secret-token",
+		"GOOSE_PROVIDER=anthropic",
+	}
+
+	filtered := FilterCredentials(env)
+
+	for _, kv := range filtered {
+		if strings.HasPrefix(kv, CredentialEnvVarPrefix) {
+			t.Errorf("expected filtered environment to omit %s* vars, found: %s", CredentialEnvVarPrefix, kv)
+		}
+	}
+
+	found := false
+	for _, kv := range filtered {
+		if kv == "GOOSE_PROVIDER=anthropic" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected filtered environment to retain unrelated vars, GOOSE_PROVIDER=anthropic not found in: %v", filtered)
+	}
+}
+
 func writeAskpassScript(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "askpass.sh")
