@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/spf13/cobra"
 
 	"github.com/konveyor/migration-harness/internal/config"
@@ -272,6 +273,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		ItemsPlanned: len(p.Items),
 	}
 	tracker.EndStep()
+	commitAndPush(repo, pushFn, "konveyor: plan complete")
 
 	// Step 3: Execute
 	tracker.StartStep("execute")
@@ -306,6 +308,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		TestsPassed: safeTestsPassed(vr),
 	}
 	tracker.EndStep()
+	commitAndPush(repo, pushFn, "konveyor: verify complete")
 
 	// Step 5: Fix Loop
 	tracker.StartStep("fix-loop")
@@ -401,6 +404,25 @@ func fixLoopIterations(r *fixloop.FixLoopReport) int {
 		return r.Iterations
 	}
 	return 0
+}
+
+func commitAndPush(repo *gogit.Repository, pushFn func() error, msg string) {
+	if repo == nil {
+		return
+	}
+	hash, err := git.CommitAll(repo, msg)
+	if err != nil {
+		logging.Warn("commit (%s): %v", msg, err)
+		return
+	}
+	if hash == (plumbing.Hash{}) {
+		return
+	}
+	if pushFn != nil {
+		if err := pushFn(); err != nil {
+			logging.Warn("push (%s): %v", msg, err)
+		}
+	}
 }
 
 func generateSessionID() string {
