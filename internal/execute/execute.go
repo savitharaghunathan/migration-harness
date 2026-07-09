@@ -94,7 +94,7 @@ func Run(ctx context.Context, repoDir, runDir, recipesDir string, p *plan.Plan, 
 		}
 
 		if repo != nil {
-			commitMsg := fmt.Sprintf("migrate: %s", item.Path)
+			commitMsg := fmt.Sprintf("migrate: #%d %s", item.N, itemLabel(item))
 			hash, err := git.CommitAll(repo, commitMsg)
 			if err != nil {
 				logging.Warn("git commit after item #%d: %v", item.N, err)
@@ -210,6 +210,19 @@ func appendExecutionLog(path string, r *ItemResult) {
 		fmt.Fprintf(f, "\n**Errors:**\n```\n%s\n```\n", r.ErrorLog)
 	}
 	fmt.Fprintf(f, "\n---\n\n")
+}
+
+func itemLabel(item plan.PlanItem) string {
+	if item.Path != "" {
+		return item.Path
+	}
+	if item.Notes != "" {
+		if len(item.Notes) > 80 {
+			return item.Notes[:80]
+		}
+		return item.Notes
+	}
+	return item.Action
 }
 
 func copyFile(src, dst string) {
