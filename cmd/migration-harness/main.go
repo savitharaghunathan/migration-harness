@@ -221,6 +221,15 @@ func runMigration(cmd *cobra.Command, args []string) error {
 	)
 
 	pipelineStatus := "completed"
+
+	syncSession := func(stepMsg string) {
+		session.Status = "in_progress"
+		if err := handoff.WriteSession(workDir, session); err != nil {
+			logging.Warn("write session.json: %v", err)
+		}
+		commitAndPush(repo, pushFn, stepMsg)
+	}
+
 	defer func() {
 		session.Status = pipelineStatus
 
@@ -260,6 +269,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		Communities: detectResult.Graph.Communities,
 	}
 	tracker.EndStep()
+	syncSession("konveyor: detect complete")
 
 	// Step 2: Plan
 	tracker.StartStep("plan")
@@ -273,7 +283,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		ItemsPlanned: len(p.Items),
 	}
 	tracker.EndStep()
-	commitAndPush(repo, pushFn, "konveyor: plan complete")
+	syncSession("konveyor: plan complete")
 
 	// Step 3: Execute
 	tracker.StartStep("execute")
@@ -294,6 +304,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		ItemsSkipped:   summary.Skipped,
 	}
 	tracker.EndStep()
+	syncSession("konveyor: execute complete")
 
 	// Step 4: Verify
 	tracker.StartStep("verify")
@@ -308,7 +319,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		TestsPassed: safeTestsPassed(vr),
 	}
 	tracker.EndStep()
-	commitAndPush(repo, pushFn, "konveyor: verify complete")
+	syncSession("konveyor: verify complete")
 
 	// Step 5: Fix Loop
 	tracker.StartStep("fix-loop")

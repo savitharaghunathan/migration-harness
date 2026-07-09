@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -13,6 +14,10 @@ import (
 )
 
 func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repository, error) {
+	if _, err := os.Stat(destDir); err == nil {
+		os.RemoveAll(destDir)
+	}
+
 	repo, err := gogit.PlainCloneContext(ctx, destDir, false, &gogit.CloneOptions{
 		URL:  cred.RepoURL,
 		Auth: cred.Auth(),
